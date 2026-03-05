@@ -6,6 +6,7 @@ import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
+import java.util.Map;
 
 @Service
 public class SystemClientService {
@@ -73,6 +74,19 @@ public class SystemClientService {
         response.setActive(false);
 
         this.repository.save(response);
+    }
+
+    public SystemClient updateClientsMarketplaces(long id, Map<String, Object> data) {
+        if (data == null || data.isEmpty()) {
+            throw new IllegalArgumentException("Client payload is required.");
+        }
+
+        SystemClient client = this.repository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Client not found for id=" + id));
+
+        client.setResource(data);
+
+        return this.repository.save(client);
     }
 
     private String validateForCreate(SystemClientCreateRequest data) {

@@ -1,7 +1,11 @@
 package com.puccampinas.omnisync.integration.entity;
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Entity
 @Table(
@@ -35,8 +39,9 @@ public class MarketplaceIntegration {
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
-    @Column(columnDefinition = "jsonb")
-    private String resource;
+    @Column(name = "resource", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private Map<String, Object> resource;
 
     @Column(nullable = false)
     private Boolean active = true;
@@ -82,9 +87,13 @@ public class MarketplaceIntegration {
         this.expiresAt = expiresAt;
     }
 
-    public String getResource() { return resource; }
+    public Map<String, Object> getResource() {
+        return this.resource;
+    }
 
-    public void setResource(String resource) { this.resource = resource; }
+    public void setResource(Map<String, Object> resource) {
+        this.resource = resource;
+    }
 
     public Boolean getActive() { return active; }
 

@@ -5,8 +5,6 @@ import com.puccampinas.omnisync.integration.client.MercadoLivreClient;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreTokenResponse;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.encrypt.TextEncryptor;
 import org.springframework.stereotype.Service;
@@ -29,7 +27,6 @@ public class MercadoLivreAuthService {
     private final MercadoLivreClient client;
     private final MarketplaceIntegrationRepository repository;
     private final TextEncryptor encryptor;
-    private final ObjectMapper objectMapper;
 
     @Value("${mercadolivre.redirect-uri}")
     private String redirectUri;
@@ -43,13 +40,11 @@ public class MercadoLivreAuthService {
     public MercadoLivreAuthService(
             MercadoLivreClient client,
             MarketplaceIntegrationRepository repository,
-            TextEncryptor encryptor,
-            ObjectMapper objectMapper
+            TextEncryptor encryptor
     ) {
         this.client = client;
         this.repository = repository;
         this.encryptor = encryptor;
-        this.objectMapper = objectMapper;
     }
 
     public String generateAuthorizationUrl(Long systemClientId) {
@@ -96,19 +91,12 @@ public class MercadoLivreAuthService {
         }
     }
 
-    private String buildResource(MercadoLivreTokenResponse token) {
-        try {
-            Map<String, Object> metadata = new HashMap<>();
-            metadata.put("scope", token.getScope());
-            metadata.put("token_type", token.getTokenType());
-            metadata.put("user_id", token.getUserId());
-
-            return objectMapper.writeValueAsString(
-                    metadata
-            );
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Unable to serialize marketplace resource metadata.", e);
-        }
+    private Map<String, Object> buildResource(MercadoLivreTokenResponse token) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("scope", token.getScope());
+        metadata.put("token_type", token.getTokenType());
+        metadata.put("user_id", token.getUserId());
+        return metadata;
     }
 
     private String generateState(Long systemClientId) {

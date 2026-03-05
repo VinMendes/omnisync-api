@@ -8,8 +8,7 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 
 @Repository
-public interface MarketplaceIntegrationRepository
-        extends JpaRepository<MarketplaceIntegration, Long> {
+public interface MarketplaceIntegrationRepository  extends JpaRepository<MarketplaceIntegration, Long> {
 
     Optional<MarketplaceIntegration>
     findBySystemClientIdAndMarketplace(

@@ -6,6 +6,7 @@ import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.service.SystemClientService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/client")
@@ -37,4 +38,10 @@ public class SystemClientController {
         service.delete(id);
         return ResponseEntity.noContent().build();
     }
+
+    @PutMapping("/updateMarketplaces/{id}")
+    public ResponseEntity<SystemClient> updateMarketplaces(@PathVariable long id, @RequestBody Map<String, Object> data) {
+        return ResponseEntity.ok(this.service.updateClientsMarketplaces(id, data));
+    }
+
 }

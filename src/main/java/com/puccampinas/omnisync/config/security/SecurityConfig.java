@@ -1,4 +1,4 @@
-package com.mendesvincs.security.security;
+package com.puccampinas.omnisync.config.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

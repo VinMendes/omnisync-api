@@ -1,4 +1,4 @@
-package com.mendesvincs.security.auth;
+package com.puccampinas.omnisync.auth;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;

@@ -1,4 +1,4 @@
-package com.mendesvincs.security.auth.dto;
+package com.puccampinas.omnisync.auth.dto;
 
 /**
  * DTO (Data Transfer Object) responsável por representar

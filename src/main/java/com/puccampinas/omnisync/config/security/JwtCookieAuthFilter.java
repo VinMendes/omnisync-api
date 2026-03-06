@@ -1,7 +1,7 @@
-package com.mendesvincs.security.security;
+package com.puccampinas.omnisync.config.security;
 
-import com.mendesvincs.security.auth.AuthCookieService;
-import com.mendesvincs.security.auth.JwtService;
+import com.puccampinas.omnisync.auth.AuthCookieService;
+import com.puccampinas.omnisync.auth.JwtService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

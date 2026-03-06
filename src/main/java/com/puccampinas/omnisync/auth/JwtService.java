@@ -1,4 +1,4 @@
-package com.mendesvincs.security.auth;
+package com.puccampinas.omnisync.auth;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;

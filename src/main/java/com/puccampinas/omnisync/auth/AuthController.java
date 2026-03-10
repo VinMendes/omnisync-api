@@ -52,7 +52,7 @@ import org.springframework.web.bind.annotation.RestController;
  * </p>
  */
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 public class AuthController {
 
     /**

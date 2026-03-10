@@ -30,13 +30,11 @@ public class SystemClientService {
     }
 
     public SystemClient getById(long id) {
-        return this.repository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Client not found for id=" + id));
+        return findActiveById(id);
     }
 
     public SystemClient update(long id, SystemClientUpdateRequest data) {
-        SystemClient existing = this.repository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Client not found for id=" + id));
+        SystemClient existing = findActiveById(id);
 
         if (data == null) {
             throw new IllegalArgumentException("Client payload is required.");
@@ -68,8 +66,7 @@ public class SystemClientService {
     }
 
     public void delete(long id) {
-        SystemClient response = this.repository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Client not found for id"));
+        SystemClient response = findActiveById(id);
 
         response.setActive(false);
 
@@ -81,12 +78,16 @@ public class SystemClientService {
             throw new IllegalArgumentException("Client payload is required.");
         }
 
-        SystemClient client = this.repository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Client not found for id=" + id));
+        SystemClient client = findActiveById(id);
 
         client.setResource(data);
 
         return this.repository.save(client);
+    }
+
+    private SystemClient findActiveById(long id) {
+        return this.repository.findByIdAndActiveTrue(id)
+                .orElseThrow(() -> new EntityNotFoundException("Active client not found for id=" + id));
     }
 
     private String validateForCreate(SystemClientCreateRequest data) {

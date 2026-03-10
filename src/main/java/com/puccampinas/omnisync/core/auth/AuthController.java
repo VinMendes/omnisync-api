@@ -1,6 +1,6 @@
-package com.puccampinas.omnisync.auth;
+package com.puccampinas.omnisync.core.auth;
 
-import com.puccampinas.omnisync.auth.dto.LoginRequest;
+import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;

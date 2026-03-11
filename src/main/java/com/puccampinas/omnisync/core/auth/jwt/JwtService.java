@@ -1,4 +1,4 @@
-package com.puccampinas.omnisync.core.auth;
+package com.puccampinas.omnisync.core.auth.jwt;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;

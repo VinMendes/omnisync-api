@@ -1,10 +1,12 @@
 package com.puccampinas.omnisync.ping.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import com.puccampinas.omnisync.ping.service.PingService;
 
 @RestController
+@RequestMapping("/api")
 public class PingController {
 
     private final PingService pingService;

@@ -1,4 +1,4 @@
-package com.puccampinas.omnisync.core.auth;
+package com.puccampinas.omnisync.core.auth.cookie;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;

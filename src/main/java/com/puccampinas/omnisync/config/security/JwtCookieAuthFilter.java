@@ -1,7 +1,7 @@
 package com.puccampinas.omnisync.config.security;
 
-import com.puccampinas.omnisync.core.auth.AuthCookieService;
-import com.puccampinas.omnisync.core.auth.JwtService;
+import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
+import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -52,17 +52,17 @@ public class JwtCookieAuthFilter extends OncePerRequestFilter {
     /**
      * Serviço responsável por informar os nomes dos cookies (access/refresh).
      */
-    private final AuthCookieService cookieService;
+    private final AuthCookieService authCookieService;
 
     /**
      * Construtor com injeção de dependências.
      *
      * @param jwtService serviço para validação e extração de dados do JWT
-     * @param cookieService serviço de utilidades para cookies de autenticação
+     * @param authCookieService serviço de utilidades para cookies de autenticação
      */
-    public JwtCookieAuthFilter(JwtService jwtService, AuthCookieService cookieService) {
+    public JwtCookieAuthFilter(JwtService jwtService, AuthCookieService authCookieService) {
         this.jwtService = jwtService;
-        this.cookieService = cookieService;
+        this.authCookieService = authCookieService;
     }
 
     /**
@@ -129,7 +129,7 @@ public class JwtCookieAuthFilter extends OncePerRequestFilter {
         Cookie[] cookies = request.getCookies();
         if (cookies == null) return null;
 
-        String name = cookieService.getAccessCookieName();
+        String name = authCookieService.getAccessCookieName();
 
         for (Cookie c : cookies) {
             if (name.equals(c.getName()) && c.getValue() != null && !c.getValue().isBlank()) {

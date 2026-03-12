@@ -18,8 +18,17 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Filtro de autenticação que lê o <strong>Access Token</strong> (JWT) vindo de um cookie HttpOnly
- * e transforma isso em uma autenticação válida dentro do Spring Security.
+ * Filtro de autenticação que lê o <strong>Access Token</strong> (JWT)
+ * tanto do header Authorization quanto do cookie HttpOnly e transforma
+ * isso em uma autenticação válida dentro do Spring Security.
+ *
+ * <p>
+ * A ordem de prioridade adotada é:
+ * </p>
+ * <ol>
+ *     <li>Header {@code Authorization: Bearer ...}</li>
+ *     <li>Cookie do Access Token</li>
+ * </ol>
  *
  * <p>
  * No modelo com <strong>2 tokens</strong> (Access + Refresh), este filtro deve usar
@@ -30,8 +39,9 @@ import java.util.List;
  * <h2>Fluxo resumido</h2>
  * <ol>
  *     <li>Verifica se já existe autenticação no SecurityContext</li>
- *     <li>Se não existir, procura o cookie do Access Token</li>
- *     <li>Se achar, valida o JWT (assinatura + expiração + tipo=access)</li>
+ *     <li>Tenta extrair o Access Token do header Bearer</li>
+ *     <li>Se não existir Bearer, tenta extrair do cookie</li>
+ *     <li>Valida o JWT (assinatura + expiração + tipo=access)</li>
  *     <li>Se for válido, cria um Authentication e salva no SecurityContext</li>
  *     <li>Segue o fluxo chamando {@code filterChain.doFilter()}</li>
  * </ol>
@@ -42,7 +52,7 @@ import java.util.List;
  * </p>
  */
 @Component
-public class JwtCookieAuthFilter extends OncePerRequestFilter {
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     /**
      * Serviço responsável por validar o JWT e extrair claims/usuário.
@@ -60,7 +70,7 @@ public class JwtCookieAuthFilter extends OncePerRequestFilter {
      * @param jwtService serviço para validação e extração de dados do JWT
      * @param authCookieService serviço de utilidades para cookies de autenticação
      */
-    public JwtCookieAuthFilter(JwtService jwtService, AuthCookieService authCookieService) {
+    public JwtAuthenticationFilter(JwtService jwtService, AuthCookieService authCookieService) {
         this.jwtService = jwtService;
         this.authCookieService = authCookieService;
     }
@@ -87,8 +97,15 @@ public class JwtCookieAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Pega o ACCESS token do cookie
-        String accessToken = extractAccessTokenFromCookie(request);
+        /*
+         * Primeiro tenta o header Authorization: Bearer ...
+         * Se não existir, tenta o cookie do Access Token.
+         */
+        String accessToken = extractBearerToken(request);
+
+        if (accessToken == null) {
+            accessToken = extractAccessTokenFromCookie(request);
+        }
 
         if (accessToken != null) {
             try {
@@ -120,10 +137,38 @@ public class JwtCookieAuthFilter extends OncePerRequestFilter {
     }
 
     /**
+     * Extrai o Access Token do header Authorization no formato Bearer.
+     *
+     * <p>
+     * Exemplo esperado:
+     * </p>
+     * <pre>
+     * Authorization: Bearer eyJhbGciOi...
+     * </pre>
+     *
+     * @param request requisição HTTP atual
+     * @return token se existir e estiver no formato correto; caso contrário, {@code null}
+     */
+    private String extractBearerToken(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+
+        if (authorization == null || authorization.isBlank()) {
+            return null;
+        }
+
+        if (!authorization.startsWith("Bearer ")) {
+            return null;
+        }
+
+        String token = authorization.substring(7).trim();
+        return token.isBlank() ? null : token;
+    }
+
+    /**
      * Extrai o Access Token do cookie configurado.
      *
      * @param request requisição HTTP atual
-     * @return token do access cookie se existir; caso contrário, null
+     * @return token do access cookie se existir; caso contrário, {@code null}
      */
     private String extractAccessTokenFromCookie(HttpServletRequest request) {
         Cookie[] cookies = request.getCookies();

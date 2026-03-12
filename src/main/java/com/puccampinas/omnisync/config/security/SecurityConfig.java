@@ -52,12 +52,12 @@ public class SecurityConfig {
      * </ul>
      *
      * @param http objeto de configuração do Spring Security
-     * @param jwtCookieAuthFilter filtro personalizado que valida JWT via cookie
+     * @param jwtAuthenticationFilter filtro personalizado que valida JWT via cookie
      * @return SecurityFilterChain configurada
      * @throws Exception caso ocorra erro na configuração
      */
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtCookieAuthFilter jwtCookieAuthFilter) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
         return http
 
                 /*
@@ -105,7 +105,7 @@ public class SecurityConfig {
                  * Isso garante que o JWT seja processado antes
                  * do mecanismo tradicional de login do Spring.
                  */
-                .addFilterBefore(jwtCookieAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 
                 .build();
     }

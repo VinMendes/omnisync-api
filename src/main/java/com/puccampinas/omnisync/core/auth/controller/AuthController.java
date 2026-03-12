@@ -3,6 +3,7 @@ package com.puccampinas.omnisync.core.auth.controller;
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.dto.AuthResponse;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
+import com.puccampinas.omnisync.core.auth.dto.RefreshResponse;
 import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
 import com.puccampinas.omnisync.core.users.entity.User;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.*;
  *     <li>Registrar novos usuários</li>
  *     <li>Autenticar usuários existentes</li>
  *     <li>Emitir cookies de access token e refresh token</li>
+ *     <li>Retornar tokens também no corpo da resposta</li>
  *     <li>Renovar o access token a partir do refresh token</li>
  *     <li>Realizar logout limpando os cookies</li>
  * </ul>
@@ -39,6 +41,20 @@ import org.springframework.web.bind.annotation.*;
  * <ul>
  *     <li><strong>Access Token</strong>: curta duração, usado nas rotas protegidas</li>
  *     <li><strong>Refresh Token</strong>: longa duração, usado para gerar um novo access token</li>
+ * </ul>
+ *
+ * <p>
+ * Além dos cookies, o sistema também retorna os tokens no corpo da resposta
+ * de login/registro. Isso permite que outros clientes, como Postman ou
+ * frontends que prefiram usar Bearer Token, aproveitem os mesmos tokens.
+ * </p>
+ *
+ * <p>
+ * No caso do refresh, o endpoint também aceita o refresh token:
+ * </p>
+ * <ul>
+ *     <li>via header {@code Authorization: Bearer ...}</li>
+ *     <li>ou via cookie</li>
  * </ul>
  *
  * <p>
@@ -88,12 +104,17 @@ public class AuthController {
      *     <li>Chama o service para cadastrar o usuário no banco</li>
      *     <li>Gera access token e refresh token</li>
      *     <li>Envia os tokens em cookies HttpOnly</li>
-     *     <li>Retorna um {@link AuthResponse} com os dados principais do usuário</li>
+     *     <li>Retorna um {@link AuthResponse} com os dados do usuário e os tokens</li>
      * </ol>
+     *
+     * <p>
+     * Dessa forma, o navegador continua usando cookies normalmente,
+     * mas outros clientes também podem usar os tokens retornados no body.
+     * </p>
      *
      * @param req dados enviados para registro
      * @param response resposta HTTP usada para adicionar os cookies
-     * @return 200 OK com os dados do usuário cadastrado, ou 400 em caso de erro de negócio
+     * @return 200 OK com os dados do usuário cadastrado e os tokens, ou 400 em caso de erro de negócio
      */
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
@@ -108,7 +129,9 @@ public class AuthController {
 
             AuthResponse authResponse = authService.buildAuthResponse(
                     "Usuário registrado com sucesso",
-                    user
+                    user,
+                    access,
+                    refresh
             );
 
             return ResponseEntity.ok(authResponse);
@@ -128,8 +151,13 @@ public class AuthController {
      *     <li>Valida as credenciais no {@link AuthService}</li>
      *     <li>Gera access token e refresh token</li>
      *     <li>Adiciona ambos nos cookies da resposta</li>
-     *     <li>Retorna um {@link AuthResponse} com informações do usuário autenticado</li>
+     *     <li>Retorna um {@link AuthResponse} com informações do usuário e os tokens</li>
      * </ol>
+     *
+     * <p>
+     * Assim, o cliente pode continuar usando o fluxo por cookie
+     * ou optar por guardar o token retornado no body e enviar via Bearer.
+     * </p>
      *
      * @param req credenciais do usuário
      * @param response resposta HTTP usada para adicionar os cookies
@@ -148,7 +176,9 @@ public class AuthController {
 
             AuthResponse authResponse = authService.buildAuthResponse(
                     "Login realizado com sucesso",
-                    user
+                    user,
+                    access,
+                    refresh
             );
 
             return ResponseEntity.ok(authResponse);
@@ -158,31 +188,55 @@ public class AuthController {
     }
 
     /**
-     * Renova o access token usando o refresh token enviado em cookie.
+     * Renova o access token usando um refresh token válido.
      *
      * <p>
-     * Fluxo:
+     * O refresh token pode ser recebido de duas formas:
      * </p>
      * <ol>
-     *     <li>Lê o cookie do refresh token</li>
-     *     <li>Valida o refresh token através do service</li>
-     *     <li>Gera um novo access token</li>
-     *     <li>Atualiza apenas o cookie do access token</li>
+     *     <li>via header {@code Authorization: Bearer ...}</li>
+     *     <li>via cookie de refresh</li>
      * </ol>
+     *
+     * <p>
+     * A prioridade é sempre do Bearer Token.
+     * Ou seja:
+     * </p>
+     * <ul>
+     *     <li>se vier Bearer, ele será usado</li>
+     *     <li>se não vier Bearer, o controller tentará usar o cookie</li>
+     * </ul>
+     *
+     * <p>
+     * Em caso de sucesso:
+     * </p>
+     * <ul>
+     *     <li>o cookie do access token é atualizado</li>
+     *     <li>o novo access token também é devolvido no body</li>
+     * </ul>
      *
      * <p>
      * Caso o refresh token esteja ausente, inválido ou expirado,
      * os cookies de autenticação são removidos.
      * </p>
      *
-     * @param request requisição HTTP atual, usada para ler os cookies
+     * @param request requisição HTTP atual, usada para ler header e cookies
      * @param response resposta HTTP usada para atualizar o cookie do access token
      * @return 200 OK se renovou com sucesso, ou 401 se o refresh for inválido
      */
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh(HttpServletRequest request,
                                      HttpServletResponse response) {
-        String refreshToken = extractCookie(request, authCookieService.getRefreshCookieName());
+
+        /*
+         * Primeiro tenta receber o refresh token via Bearer.
+         * Se não vier header Authorization, tenta o cookie de refresh.
+         */
+        String refreshToken = extractBearerToken(request);
+
+        if (refreshToken == null) {
+            refreshToken = extractCookie(request, authCookieService.getRefreshCookieName());
+        }
 
         if (refreshToken == null) {
             return ResponseEntity.status(401).body("Refresh token ausente");
@@ -194,7 +248,12 @@ public class AuthController {
             int accessMaxAge = 15 * 60;
             authCookieService.setAccessCookie(response, newAccess, accessMaxAge);
 
-            return ResponseEntity.ok("Access renovado");
+            RefreshResponse refreshResponse = new RefreshResponse(
+                    "Access renovado com sucesso",
+                    newAccess
+            );
+
+            return ResponseEntity.ok(refreshResponse);
         } catch (RuntimeException e) {
             authCookieService.clearAuthCookies(response);
             return ResponseEntity.status(401).body(e.getMessage());
@@ -243,6 +302,34 @@ public class AuthController {
 
         authCookieService.setAccessCookie(response, access, accessMaxAge);
         authCookieService.setRefreshCookie(response, refresh, refreshMaxAge);
+    }
+
+    /**
+     * Extrai o token do header Authorization no formato Bearer.
+     *
+     * <p>
+     * Exemplo esperado:
+     * </p>
+     * <pre>
+     * Authorization: Bearer eyJhbGciOi...
+     * </pre>
+     *
+     * @param request requisição HTTP atual
+     * @return token se existir e estiver no formato correto; caso contrário, {@code null}
+     */
+    private String extractBearerToken(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+
+        if (authorization == null || authorization.isBlank()) {
+            return null;
+        }
+
+        if (!authorization.startsWith("Bearer ")) {
+            return null;
+        }
+
+        String token = authorization.substring(7).trim();
+        return token.isBlank() ? null : token;
     }
 
     /**

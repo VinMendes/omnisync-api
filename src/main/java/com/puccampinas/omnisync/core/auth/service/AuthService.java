@@ -27,6 +27,25 @@ import org.springframework.stereotype.Service;
  * <p>
  * O controller apenas recebe a requisição HTTP e delega a lógica para este serviço.
  * </p>
+ *
+ * <h2>Observação sobre o modelo híbrido adotado</h2>
+ * <p>
+ * A aplicação continua enviando os tokens em <strong>cookies HttpOnly</strong>,
+ * mas agora também pode retornar os tokens no corpo da resposta.
+ * </p>
+ *
+ * <p>
+ * Isso permite que:
+ * </p>
+ * <ul>
+ *     <li>o navegador continue funcionando naturalmente com cookies</li>
+ *     <li>clientes como Postman ou frontend customizado utilizem Bearer Token</li>
+ * </ul>
+ *
+ * <p>
+ * Ou seja, mantemos a praticidade do cookie e ganhamos flexibilidade
+ * para outros tipos de cliente.
+ * </p>
  */
 @Service
 public class AuthService {
@@ -197,19 +216,40 @@ public class AuthService {
     }
 
     /**
-     * Monta um DTO de resposta de autenticação com os dados básicos do usuário.
+     * Monta um DTO de resposta de autenticação com os dados básicos do usuário
+     * e com os tokens recém-gerados.
+     *
+     * <p>
+     * Essa resposta segue o modelo híbrido da aplicação:
+     * </p>
+     * <ul>
+     *     <li>os cookies continuam sendo enviados normalmente</li>
+     *     <li>os tokens também são devolvidos no body para clientes que preferirem usar Bearer</li>
+     * </ul>
+     *
+     * <p>
+     * Isso não substitui os cookies, apenas adiciona uma segunda forma
+     * de o cliente consumir a autenticação.
+     * </p>
      *
      * @param message mensagem de retorno da operação
      * @param user usuário autenticado ou registrado
+     * @param accessToken access token gerado
+     * @param refreshToken refresh token gerado
      * @return resposta padronizada de autenticação
      */
-    public AuthResponse buildAuthResponse(String message, User user) {
+    public AuthResponse buildAuthResponse(String message,
+                                          User user,
+                                          String accessToken,
+                                          String refreshToken) {
         return new AuthResponse(
                 message,
                 user.getId(),
                 user.getName(),
                 user.getEmail(),
-                user.getActive()
+                user.getActive(),
+                accessToken,
+                refreshToken
         );
     }
 

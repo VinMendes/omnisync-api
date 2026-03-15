@@ -1,0 +1,367 @@
+package com.puccampinas.omnisync.core.product.service;
+
+import com.puccampinas.omnisync.core.product.dto.ProductDto;
+import com.puccampinas.omnisync.core.product.entity.Product;
+import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+class ProductServiceTest {
+
+    private ProductRepository productRepository;
+    private ProductService productService;
+
+    @BeforeEach
+    void setUp() {
+        productRepository = mock(ProductRepository.class);
+        productService = new ProductService(productRepository);
+        reset(productRepository);
+    }
+
+    @Test
+    void getAllShouldThrowWhenSystemClientIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.getAll(null)
+        );
+
+        assertEquals("System client id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void getAllShouldReturnProductsWhenSystemClientIdIsProvided() {
+        Product product = buildProduct(10L, 1L);
+        when(productRepository.findAllBySystemClientIdAndActiveTrue(1L)).thenReturn(List.of(product));
+
+        List<ProductDto> result = productService.getAll(1L);
+
+        assertEquals(1, result.size());
+        assertEquals(10L, result.getFirst().getId());
+        assertEquals(1L, result.getFirst().getSystemClientId());
+        assertEquals("SKU-1", result.getFirst().getSku());
+        verify(productRepository).findAllBySystemClientIdAndActiveTrue(1L);
+    }
+
+    @Test
+    void getByIdShouldThrowWhenSystemClientIdAndIdAreNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.getById(null, null)
+        );
+
+        assertEquals("System client id and id are required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void getByIdShouldThrowWhenSystemClientIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.getById(null, 9L)
+        );
+
+        assertEquals("System client id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void getByIdShouldThrowWhenIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.getById(1L, null)
+        );
+
+        assertEquals("Id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void getByIdShouldReturnProductWhenIdentifiersAreProvided() {
+        Product product = buildProduct(10L, 1L);
+        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(10L, 1L))
+                .thenReturn(Optional.of(product));
+
+        ProductDto result = productService.getById(1L, 10L);
+
+        assertEquals(10L, result.getId());
+        assertEquals(1L, result.getSystemClientId());
+        assertEquals("Product 1", result.getName());
+        verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
+    }
+
+    @Test
+    void createShouldThrowWhenSystemClientIdAndPayloadAreNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.create(null, null)
+        );
+
+        assertEquals("System client id and product payload are required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void createShouldThrowWhenSystemClientIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.create(null, validDto())
+        );
+
+        assertEquals("System client id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void createShouldThrowWhenPayloadSystemClientIdIsNull() {
+        ProductDto dto = validDto();
+        dto.setSystemClientId(null);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.create(1L, dto)
+        );
+
+        assertEquals("System client is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void createShouldThrowWhenNameIsMissing() {
+        assertCreateValidationError(dto -> dto.setName(" "), "Name is required.");
+    }
+
+    @Test
+    void createShouldThrowWhenSkuIsMissing() {
+        assertCreateValidationError(dto -> dto.setSku(" "), "SKU is required.");
+    }
+
+    @Test
+    void createShouldThrowWhenDescriptionIsMissing() {
+        assertCreateValidationError(dto -> dto.setDescription(" "), "Description is required.");
+    }
+
+    @Test
+    void createShouldThrowWhenPriceIsMissing() {
+        assertCreateValidationError(dto -> dto.setPrice(null), "Price is required.");
+    }
+
+    @Test
+    void createShouldThrowWhenPriceHasMoreThanTwoDecimalPlaces() {
+        assertCreateValidationError(
+                dto -> dto.setPrice(new BigDecimal("10.999")),
+                "Price must have at most 2 decimal places."
+        );
+    }
+
+    @Test
+    void createShouldThrowWhenPriceIsNegative() {
+        assertCreateValidationError(dto -> dto.setPrice(new BigDecimal("-1.00")), "Price has to be above 0.");
+    }
+
+    @Test
+    void createShouldThrowWhenStockIsNegative() {
+        assertCreateValidationError(dto -> dto.setStock(-1), "Stock has to be above 0.");
+    }
+
+    @Test
+    void createShouldThrowWhenReservedStockIsNegative() {
+        assertCreateValidationError(dto -> dto.setReservedStock(-1), "Reserved stock has to be above 0.");
+    }
+
+    @Test
+    void createShouldReturnDtoWhenPayloadIsValid() {
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            product.setId(10L);
+            return product;
+        });
+
+        ProductDto result = productService.create(1L, validDto());
+
+        assertEquals(10L, result.getId());
+        assertEquals(1L, result.getSystemClientId());
+        assertTrue(result.isActive());
+        assertNotNull(result.getCreatedAt());
+        verify(productRepository).save(any(Product.class));
+    }
+
+    @Test
+    void updateShouldThrowWhenSystemClientIdAndIdAreNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.update(null, null, validDto())
+        );
+
+        assertEquals("System client id and id are required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void updateShouldThrowWhenSystemClientIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.update(null, 10L, validDto())
+        );
+
+        assertEquals("System client id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void updateShouldThrowWhenIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.update(1L, null, validDto())
+        );
+
+        assertEquals("Id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void updateShouldThrowWhenPayloadDoesNotPassValidation() {
+        ProductDto dto = validDto();
+        dto.setPrice(null);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.update(1L, 10L, dto)
+        );
+
+        assertEquals("Price is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void updateShouldReturnUpdatedDtoWhenPayloadIsValid() {
+        Product existing = buildProduct(10L, 1L);
+        ProductDto dto = validDto();
+        dto.setName("Updated Product");
+        dto.setPrice(new BigDecimal("159.90"));
+
+        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(10L, 1L))
+                .thenReturn(Optional.of(existing));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProductDto result = productService.update(1L, 10L, dto);
+
+        assertEquals(10L, result.getId());
+        assertEquals("Updated Product", result.getName());
+        assertEquals(new BigDecimal("159.90"), result.getPrice());
+        assertEquals(1L, result.getSystemClientId());
+        verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
+        verify(productRepository).save(any(Product.class));
+    }
+
+    @Test
+    void deleteShouldThrowWhenSystemClientIdAndIdAreNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.delete(null, null)
+        );
+
+        assertEquals("System client id and id are required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void deleteShouldThrowWhenSystemClientIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.delete(null, 10L)
+        );
+
+        assertEquals("System client id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void deleteShouldThrowWhenIdIsNull() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.delete(1L, null)
+        );
+
+        assertEquals("Id is required.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void deleteShouldReturnDtoWithInactiveStatusWhenIdentifiersAreProvided() {
+        Product existing = buildProduct(10L, 1L);
+        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(10L, 1L))
+                .thenReturn(Optional.of(existing));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProductDto result = productService.delete(1L, 10L);
+
+        assertEquals(10L, result.getId());
+        assertFalse(result.isActive());
+        verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
+        verify(productRepository).save(any(Product.class));
+    }
+
+    private void assertCreateValidationError(DtoMutator mutator, String expectedMessage) {
+        ProductDto dto = validDto();
+        mutator.mutate(dto);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.create(1L, dto)
+        );
+
+        assertEquals(expectedMessage, error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    private ProductDto validDto() {
+        ProductDto dto = new ProductDto();
+        dto.setSystemClientId(1L);
+        dto.setSku("SKU-1");
+        dto.setName("Product 1");
+        dto.setDescription("Valid description");
+        dto.setStock(10);
+        dto.setReservedStock(2);
+        dto.setPrice(new BigDecimal("99.90"));
+        dto.setResource(Map.of("color", "blue"));
+        return dto;
+    }
+
+    private Product buildProduct(Long id, Long systemClientId) {
+        Product product = new Product();
+        product.setId(id);
+        product.setSystemClientId(systemClientId);
+        product.setSku("SKU-1");
+        product.setName("Product 1");
+        product.setDescription("Valid description");
+        product.setStock(10);
+        product.setReservedStock(2);
+        product.setPrice(new BigDecimal("99.90"));
+        product.setResource(Map.of("color", "blue"));
+        product.setActive(true);
+        return product;
+    }
+
+    @FunctionalInterface
+    private interface DtoMutator {
+        void mutate(ProductDto dto);
+    }
+}

@@ -1,7 +1,6 @@
 package com.puccampinas.omnisync.core.sale.entity;
 
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.sale.enums.SaleChannel;
 import com.puccampinas.omnisync.core.sale.enums.SaleStatus;
@@ -23,17 +22,9 @@ public class Sale {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "system_client_id", nullable = false)
-    private SystemClient systemClientId;
-
-    //   vamos usar a estrutura quando tivermos o Product!
-//    @ManyToOne(fetch = FetchType.LAZY)
-//    @JoinColumn(name = "system_client_id", nullable = false)
-//    private SystemClient systemClient;
-
+    private SystemClient systemClient;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
@@ -68,8 +59,8 @@ public class Sale {
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
-    public SystemClient getSystemClient() { return systemClientId; }
-    public void setSystemClient(SystemClient systemClient) { this.systemClientId = systemClient; }
+    public SystemClient getSystemClient() { return systemClient; }
+    public void setSystemClient(SystemClient systemClient) { this.systemClient = systemClient; }
 
     public Product getProduct() { return product; }
     public void setProduct(Product product) { this.product = product; }

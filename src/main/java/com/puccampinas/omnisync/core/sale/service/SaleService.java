@@ -30,8 +30,6 @@ public class SaleService {
         SystemClient client = systemClientRepository.findById(clientID)
                 .orElseThrow(() -> new RuntimeException("Cliente nao encontrado com o ID: " + clientID));
 
-        //TODO buscar productRepository quando Product Existir
-        // Busca o produto real no banco de dados
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new RuntimeException("Produto não encontrado com ID: " + request.getProductId()));
 

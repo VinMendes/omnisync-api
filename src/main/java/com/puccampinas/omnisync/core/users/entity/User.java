@@ -1,11 +1,11 @@
 package com.puccampinas.omnisync.core.users.entity;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Entity
 @Table(name = "users")
@@ -26,7 +26,7 @@ public class User {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "resource", columnDefinition = "jsonb")
-    private JsonNode resource;
+    private Map<String, Object> resource;
 
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
@@ -82,11 +82,11 @@ public class User {
         this.email = email == null ? null : email.trim().toLowerCase();
     }
 
-    public JsonNode getResource() {
+    public Map<String, Object> getResource() {
         return resource;
     }
 
-    public void setResource(JsonNode resource) {
+    public void setResource(Map<String, Object> resource) {
         this.resource = resource;
     }
 

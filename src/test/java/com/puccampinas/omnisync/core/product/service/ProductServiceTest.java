@@ -3,8 +3,12 @@ package com.puccampinas.omnisync.core.product.service;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -17,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -25,21 +31,26 @@ import static org.mockito.Mockito.when;
 
 class ProductServiceTest {
 
+    private static final long OFFSET = 0;
+    private static final int LIMIT = 10;
+
     private ProductRepository productRepository;
+    private ProductLogService productLogService;
     private ProductService productService;
 
     @BeforeEach
     void setUp() {
         productRepository = mock(ProductRepository.class);
-        productService = new ProductService(productRepository);
-        reset(productRepository);
+        productLogService = mock(ProductLogService.class);
+        productService = new ProductService(productRepository, productLogService);
+        reset(productRepository, productLogService);
     }
 
     @Test
     void getAllShouldThrowWhenSystemClientIdIsNull() {
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
-                () -> productService.getAll(null)
+                () -> productService.getAll(null, OFFSET, LIMIT)
         );
 
         assertEquals("System client id is required.", error.getMessage());
@@ -47,17 +58,71 @@ class ProductServiceTest {
     }
 
     @Test
+    void getAllShouldThrowWhenOffsetIsNegative() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.getAll(1L, -1, LIMIT)
+        );
+
+        assertEquals("Offset must be greater than or equal to 0.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void getAllShouldThrowWhenLimitIsInvalid() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.getAll(1L, OFFSET, 0)
+        );
+
+        assertEquals("Limit must be greater than 0.", error.getMessage());
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
     void getAllShouldReturnProductsWhenSystemClientIdIsProvided() {
         Product product = buildProduct(10L, 1L);
-        when(productRepository.findAllBySystemClientIdAndActiveTrue(1L)).thenReturn(List.of(product));
+        when(productRepository.findAllBySystemClientIdAndActiveTrue(any(Long.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(product)));
 
-        List<ProductDto> result = productService.getAll(1L);
+        Page<ProductDto> result = productService.getAll(1L, OFFSET, LIMIT);
 
-        assertEquals(1, result.size());
-        assertEquals(10L, result.getFirst().getId());
-        assertEquals(1L, result.getFirst().getSystemClientId());
-        assertEquals("SKU-1", result.getFirst().getSku());
-        verify(productRepository).findAllBySystemClientIdAndActiveTrue(1L);
+        assertEquals(1, result.getTotalElements());
+        assertEquals(10L, result.getContent().getFirst().getId());
+        assertEquals(1L, result.getContent().getFirst().getSystemClientId());
+        assertEquals("SKU-1", result.getContent().getFirst().getSku());
+        verify(productRepository).findAllBySystemClientIdAndActiveTrue(
+                eq(1L),
+                argThat(pageable -> pageable.getOffset() == OFFSET && pageable.getPageSize() == LIMIT)
+        );
+    }
+
+    @Test
+    void getBySkuShouldThrowWhenSkuIsNotFound() {
+        when(productRepository.findBySkuAndSystemClientIdAndActiveTrue("SKU-404", 1L))
+                .thenReturn(Optional.empty());
+
+        EntityNotFoundException error = assertThrows(
+                EntityNotFoundException.class,
+                () -> productService.getBySku(1L, "SKU-404")
+        );
+
+        assertEquals("SKU não encontrada.", error.getMessage());
+        verify(productRepository).findBySkuAndSystemClientIdAndActiveTrue("SKU-404", 1L);
+    }
+
+    @Test
+    void getBySkuShouldReturnProductWhenSkuIsFound() {
+        Product product = buildProduct(10L, 1L);
+        when(productRepository.findBySkuAndSystemClientIdAndActiveTrue("SKU-1", 1L))
+                .thenReturn(Optional.of(product));
+
+        ProductDto result = productService.getBySku(1L, "SKU-1");
+
+        assertEquals(10L, result.getId());
+        assertEquals(1L, result.getSystemClientId());
+        assertEquals("SKU-1", result.getSku());
+        verify(productRepository).findBySkuAndSystemClientIdAndActiveTrue("SKU-1", 1L);
     }
 
     @Test
@@ -201,6 +266,7 @@ class ProductServiceTest {
         assertTrue(result.isActive());
         assertNotNull(result.getCreatedAt());
         verify(productRepository).save(any(Product.class));
+        verify(productLogService).logCreate(any(Product.class));
     }
 
     @Test
@@ -269,6 +335,7 @@ class ProductServiceTest {
         assertEquals(1L, result.getSystemClientId());
         verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
         verify(productRepository).save(any(Product.class));
+        verify(productLogService).logEdit(any(Product.class), any(Product.class));
     }
 
     @Test
@@ -317,6 +384,7 @@ class ProductServiceTest {
         assertFalse(result.isActive());
         verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
         verify(productRepository).save(any(Product.class));
+        verify(productLogService).logDelete(any(Product.class), any(Product.class));
     }
 
     private void assertCreateValidationError(DtoMutator mutator, String expectedMessage) {

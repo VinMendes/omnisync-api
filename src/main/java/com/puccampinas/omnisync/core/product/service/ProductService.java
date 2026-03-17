@@ -1,23 +1,28 @@
 package com.puccampinas.omnisync.core.product.service;
 
+import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final ProductLogService productLogService;
 
-    public ProductService(ProductRepository productRepository) {
+    public ProductService(ProductRepository productRepository, ProductLogService productLogService) {
         this.productRepository = productRepository;
+        this.productLogService = productLogService;
     }
 
+    @Transactional
     public ProductDto create(Long systemClientId, ProductDto data) {
         validateCreateRequest(systemClientId, data);
         validator(data, systemClientId);
@@ -27,15 +32,29 @@ public class ProductService {
         product.setSystemClientId(systemClientId);
         product.setActive(true);
 
-        return toDto(this.productRepository.save(product));
+        Product savedProduct = this.productRepository.save(product);
+        this.productLogService.logCreate(savedProduct);
+
+        return toDto(savedProduct);
     }
 
-    public List<ProductDto> getAll(Long systemClientId) {
+    public Page<ProductDto> getAll(Long systemClientId, long offset, int limit) {
         validateSystemClientId(systemClientId);
-        return this.productRepository.findAllBySystemClientIdAndActiveTrue(systemClientId)
-                .stream()
-                .map(this::toDto)
-                .toList();
+        validatePagination(offset, limit);
+
+        return this.productRepository.findAllBySystemClientIdAndActiveTrue(
+                        systemClientId,
+                        new OffsetLimitPageable(offset, limit)
+                )
+                .map(this::toDto);
+    }
+
+    public ProductDto getBySku(Long systemClientId, String sku) {
+        validateSystemClientId(systemClientId);
+        validateSku(sku);
+
+        return toDto(this.productRepository.findBySkuAndSystemClientIdAndActiveTrue(sku, systemClientId)
+                .orElseThrow(() -> new EntityNotFoundException("SKU não encontrada.")));
     }
 
     public ProductDto getById(Long systemClientId, Long id) {
@@ -43,11 +62,13 @@ public class ProductService {
         return toDto(findActiveById(systemClientId, id));
     }
 
+    @Transactional
     public ProductDto update(Long systemClientId, Long id, ProductDto data) {
         validateIdentifiers(systemClientId, id);
         validator(data, systemClientId);
 
         Product existing = findActiveById(systemClientId, id);
+        Product previousState = copy(existing);
         existing.setSystemClientId(systemClientId);
         existing.setSku(data.getSku());
         existing.setName(data.getName());
@@ -57,15 +78,23 @@ public class ProductService {
         existing.setPrice(data.getPrice());
         existing.setResource(data.getResource());
 
-        return toDto(this.productRepository.save(existing));
+        Product updatedProduct = this.productRepository.save(existing);
+        this.productLogService.logEdit(previousState, updatedProduct);
+
+        return toDto(updatedProduct);
     }
 
+    @Transactional
     public ProductDto delete(Long systemClientId, Long id) {
         validateIdentifiers(systemClientId, id);
         Product existing = findActiveById(systemClientId, id);
+        Product previousState = copy(existing);
         existing.setActive(false);
 
-        return toDto(this.productRepository.save(existing));
+        Product deletedProduct = this.productRepository.save(existing);
+        this.productLogService.logDelete(previousState, deletedProduct);
+
+        return toDto(deletedProduct);
     }
 
     private Product findActiveById(Long systemClientId, Long id) {
@@ -92,6 +121,22 @@ public class ProductService {
     private void validateSystemClientId(Long systemClientId) {
         if (systemClientId == null) {
             throw new IllegalArgumentException("System client id is required.");
+        }
+    }
+
+    private void validatePagination(long offset, int limit) {
+        if (offset < 0) {
+            throw new IllegalArgumentException("Offset must be greater than or equal to 0.");
+        }
+
+        if (limit < 1) {
+            throw new IllegalArgumentException("Limit must be greater than 0.");
+        }
+    }
+
+    private void validateSku(String sku) {
+        if (sku == null || sku.trim().isEmpty()) {
+            throw new IllegalArgumentException("SKU is required.");
         }
     }
 
@@ -166,6 +211,22 @@ public class ProductService {
         product.setPrice(data.getPrice());
         product.setResource(data.getResource());
         return product;
+    }
+
+    private Product copy(Product source) {
+        Product copy = new Product();
+        copy.setId(source.getId());
+        copy.setSystemClientId(source.getSystemClientId());
+        copy.setSku(source.getSku());
+        copy.setName(source.getName());
+        copy.setDescription(source.getDescription());
+        copy.setStock(source.getStock());
+        copy.setReservedStock(source.getReservedStock());
+        copy.setPrice(source.getPrice());
+        copy.setResource(source.getResource());
+        copy.setActive(source.getActive());
+        copy.setCreatedAt(source.getCreatedAt());
+        return copy;
     }
 
     private ProductDto toDto(Product product) {

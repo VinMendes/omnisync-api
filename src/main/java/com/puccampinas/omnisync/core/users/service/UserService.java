@@ -19,6 +19,13 @@ public class UserService {
         this.userRepository = userRepository;
     }
 
+    public UserResponse findMe(String email) {
+        User user = userRepository.findByEmail(email == null ? null : email.trim().toLowerCase())
+                .orElseThrow(() -> new EntityNotFoundException("Usuário autenticado não encontrado."));
+
+        return toResponse(user);
+    }
+
     public UserResponse findById(Long id) {
         User user = findUserEntityById(id);
         return toResponse(user);
@@ -81,7 +88,9 @@ public class UserService {
 
     private User findUserEntityById(Long id) {
         return userRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Usuário não encontrado."));
+                .orElseThrow(() -> {
+                    return new EntityNotFoundException("Usuário não encontrado.");
+                });
     }
 
     private UserResponse toResponse(User user) {

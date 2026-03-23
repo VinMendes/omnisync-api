@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import java.util.Map;
+
 public record RegisterRequest(
 
         @NotNull(message = "systemClientId é obrigatório")
@@ -24,6 +26,6 @@ public record RegisterRequest(
         @Size(min = 6, max = 100, message = "password deve ter entre 6 e 100 caracteres")
         String password,
 
-        JsonNode resource
+        Map<String, Object> resource
 ) {
 }

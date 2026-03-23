@@ -2,10 +2,9 @@ package com.puccampinas.omnisync.core.product.controller;
 
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.service.ProductService;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/products/{systemClientId}")
@@ -26,8 +25,20 @@ public class ProductController {
     }
 
     @GetMapping
-    public ResponseEntity<List<ProductDto>> getAll(@PathVariable Long systemClientId) {
-        return ResponseEntity.ok(this.service.getAll(systemClientId));
+    public ResponseEntity<Page<ProductDto>> getAll(
+            @PathVariable Long systemClientId,
+            @RequestParam(defaultValue = "0") long offset,
+            @RequestParam(defaultValue = "20") int limit
+    ) {
+        return ResponseEntity.ok(this.service.getAll(systemClientId, offset, limit));
+    }
+
+    @GetMapping("/sku/{sku}")
+    public ResponseEntity<ProductDto> getBySku(
+            @PathVariable Long systemClientId,
+            @PathVariable String sku
+    ) {
+        return ResponseEntity.ok(this.service.getBySku(systemClientId, sku));
     }
 
     @GetMapping("/{id}")

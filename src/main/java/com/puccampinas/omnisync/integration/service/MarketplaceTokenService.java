@@ -39,10 +39,7 @@ public class MarketplaceTokenService {
         }
 
         MarketplaceIntegration integration = repository
-                .findBySystemClientIdAndMarketplaceAndActiveTrue(
-                        systemClientId,
-                        marketplace
-                )
+                .findBySystemClientIdAndMarketplaceAndActiveTrue(systemClientId, marketplace)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No active Mercado Livre integration found for systemClientId=" + systemClientId
                 ));
@@ -55,10 +52,10 @@ public class MarketplaceTokenService {
     }
 
     private boolean shouldRefresh(MarketplaceIntegration integration) {
-        return integration.getExpiresAt() == null ||
-                integration.getExpiresAt().isBefore(
-                        LocalDateTime.now().plusSeconds(EXPIRATION_SAFETY_WINDOW_SECONDS)
-                );
+        return integration.getExpiresAt() == null
+                || integration.getExpiresAt().isBefore(
+                LocalDateTime.now().plusSeconds(EXPIRATION_SAFETY_WINDOW_SECONDS)
+        );
     }
 
     private void refreshAccessToken(MarketplaceIntegration integration) {
@@ -68,9 +65,8 @@ public class MarketplaceTokenService {
             );
         }
 
-        MercadoLivreTokenResponse refreshedToken = mercadoLivreClient.refreshAccessToken(
-                encryptor.decrypt(integration.getRefreshToken())
-        );
+        MercadoLivreTokenResponse refreshedToken =
+                mercadoLivreClient.refreshAccessToken(encryptor.decrypt(integration.getRefreshToken()));
 
         if (refreshedToken == null || refreshedToken.getAccessToken() == null || refreshedToken.getExpiresIn() == null) {
             throw new IllegalStateException("Mercado Livre refresh token response is invalid.");
@@ -78,10 +74,8 @@ public class MarketplaceTokenService {
 
         integration.setAccessToken(encryptor.encrypt(refreshedToken.getAccessToken()));
 
-        if (refreshedToken.getRefreshToken() != null) {
-            integration.setRefreshToken(
-                    encryptor.encrypt(refreshedToken.getRefreshToken())
-            );
+        if (refreshedToken.getRefreshToken() != null && !refreshedToken.getRefreshToken().isBlank()) {
+            integration.setRefreshToken(encryptor.encrypt(refreshedToken.getRefreshToken()));
         }
 
         integration.setExpiresAt(LocalDateTime.now().plusSeconds(refreshedToken.getExpiresIn()));

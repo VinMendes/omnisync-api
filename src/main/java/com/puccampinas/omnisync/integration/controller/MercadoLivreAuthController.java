@@ -1,9 +1,15 @@
 package com.puccampinas.omnisync.integration.controller;
 
+import com.puccampinas.omnisync.integration.dto.MercadoLivreCodeExchangeRequest;
+import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationResponse;
 import com.puccampinas.omnisync.integration.service.MercadoLivreAuthService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,13 +27,27 @@ public class MercadoLivreAuthController {
     }
 
     @GetMapping("/connect-url")
-    public ResponseEntity<Map<String, String>> connectUrl(
-            @RequestParam Long systemClientId
+    public ResponseEntity<Map<String, String>> connectUrl(@RequestParam Long systemClientId) {
+        return ResponseEntity.ok(Map.of(
+                "authorizationUrl",
+                service.generateAuthorizationUrl(systemClientId)
+        ));
+    }
+
+    @PostMapping("/exchange")
+    public ResponseEntity<MercadoLivreIntegrationResponse> exchangeCode(
+            @Valid @RequestBody MercadoLivreCodeExchangeRequest request,
+            Authentication authentication
     ) {
+        if (authentication == null || authentication.getName() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
         return ResponseEntity.ok(
-                Map.of(
-                        "authorizationUrl",
-                        service.generateAuthorizationUrl(systemClientId)
+                service.exchangeCodeForAuthenticatedUser(
+                        authentication.getName(),
+                        request.state(),
+                        request.code()
                 )
         );
     }
@@ -41,7 +61,7 @@ public class MercadoLivreAuthController {
     ) {
         if (error != null) {
             String message = "Mercado Livre OAuth denied: " + error;
-            if (errorDescription != null) {
+            if (errorDescription != null && !errorDescription.isBlank()) {
                 message += " - " + errorDescription;
             }
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(message);
@@ -54,8 +74,6 @@ public class MercadoLivreAuthController {
         }
 
         Long systemClientId = service.handleCallback(state, code);
-        return ResponseEntity.ok(
-                "Integration successful for systemClientId=" + systemClientId
-        );
+        return ResponseEntity.ok("Mercado Livre integration successful for systemClientId=" + systemClientId);
     }
 }

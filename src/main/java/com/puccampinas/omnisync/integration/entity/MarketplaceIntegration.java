@@ -1,6 +1,15 @@
 package com.puccampinas.omnisync.integration.entity;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -49,57 +58,73 @@ public class MarketplaceIntegration {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
-    public MarketplaceIntegration() {}
+    public Long getId() {
+        return id;
+    }
 
-    // ===== GETTERS E SETTERS =====
+    public void setId(Long id) {
+        this.id = id;
+    }
 
-    public Long getId() { return id; }
-
-    public void setId(Long id) { this.id = id; }
-
-    public Long getSystemClientId() { return systemClientId; }
+    public Long getSystemClientId() {
+        return systemClientId;
+    }
 
     public void setSystemClientId(Long systemClientId) {
         this.systemClientId = systemClientId;
     }
 
-    public Marketplace getMarketplace() { return marketplace; }
+    public Marketplace getMarketplace() {
+        return marketplace;
+    }
 
     public void setMarketplace(Marketplace marketplace) {
         this.marketplace = marketplace;
     }
 
-    public String getAccessToken() { return accessToken; }
+    public String getAccessToken() {
+        return accessToken;
+    }
 
     public void setAccessToken(String accessToken) {
         this.accessToken = accessToken;
     }
 
-    public String getRefreshToken() { return refreshToken; }
+    public String getRefreshToken() {
+        return refreshToken;
+    }
 
     public void setRefreshToken(String refreshToken) {
         this.refreshToken = refreshToken;
     }
 
-    public LocalDateTime getExpiresAt() { return expiresAt; }
+    public LocalDateTime getExpiresAt() {
+        return expiresAt;
+    }
 
     public void setExpiresAt(LocalDateTime expiresAt) {
         this.expiresAt = expiresAt;
     }
 
     public Map<String, Object> getResource() {
-        return this.resource;
+        return resource;
     }
 
     public void setResource(Map<String, Object> resource) {
         this.resource = resource;
     }
 
-    public Boolean getActive() { return active; }
+    public Boolean getActive() {
+        return active;
+    }
 
-    public void setActive(Boolean active) { this.active = active; }
+    public void setActive(Boolean active) {
+        this.active = active;
+    }
 
-    public LocalDateTime getCreatedAt() { return createdAt; }
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;

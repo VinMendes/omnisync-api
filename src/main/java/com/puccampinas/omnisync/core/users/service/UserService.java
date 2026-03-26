@@ -20,10 +20,20 @@ public class UserService {
     }
 
     public UserResponse findMe(String email) {
+        User user = findActiveEntityByEmail(email);
+
+        return toResponse(user);
+    }
+
+    public User findActiveEntityByEmail(String email) {
         User user = userRepository.findByEmail(email == null ? null : email.trim().toLowerCase())
                 .orElseThrow(() -> new EntityNotFoundException("Usuário autenticado não encontrado."));
 
-        return toResponse(user);
+        if (!Boolean.TRUE.equals(user.getActive())) {
+            throw new EntityNotFoundException("Usuário autenticado não encontrado.");
+        }
+
+        return user;
     }
 
     public UserResponse findById(Long id) {

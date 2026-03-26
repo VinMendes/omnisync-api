@@ -1,5 +1,6 @@
 package com.puccampinas.omnisync.integration.client;
 
+import com.puccampinas.omnisync.common.exception.ExternalApiException;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreTokenResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -7,8 +8,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
 public class MercadoLivreClient {
@@ -18,10 +20,10 @@ public class MercadoLivreClient {
 
     private final RestTemplate restTemplate;
 
-    @Value("${mercadolivre.client-id}")
+    @Value("${mercadolivre.client-id:}")
     private String clientId;
 
-    @Value("${mercadolivre.client-secret}")
+    @Value("${mercadolivre.client-secret:}")
     private String clientSecret;
 
     public MercadoLivreClient(RestTemplate restTemplate) {
@@ -29,6 +31,8 @@ public class MercadoLivreClient {
     }
 
     public MercadoLivreTokenResponse exchangeCode(String code, String redirectUri) {
+        validateCredentials();
+
         LinkedMultiValueMap<String, String> body = new LinkedMultiValueMap<>();
         body.add("grant_type", "authorization_code");
         body.add("client_id", clientId);
@@ -40,6 +44,8 @@ public class MercadoLivreClient {
     }
 
     public MercadoLivreTokenResponse refreshAccessToken(String refreshToken) {
+        validateCredentials();
+
         LinkedMultiValueMap<String, String> body = new LinkedMultiValueMap<>();
         body.add("grant_type", "refresh_token");
         body.add("client_id", clientId);
@@ -50,6 +56,8 @@ public class MercadoLivreClient {
     }
 
     public String buildAuthorizationUrl(String redirectUri, String state) {
+        validateCredentials();
+
         return UriComponentsBuilder.fromUriString(OAUTH_URL)
                 .queryParam("response_type", "code")
                 .queryParam("client_id", clientId)
@@ -58,19 +66,28 @@ public class MercadoLivreClient {
                 .toUriString();
     }
 
-    private MercadoLivreTokenResponse requestToken(
-            LinkedMultiValueMap<String, String> body
-    ) {
+    private MercadoLivreTokenResponse requestToken(LinkedMultiValueMap<String, String> body) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-        HttpEntity<LinkedMultiValueMap<String, String>> request =
-                new HttpEntity<>(body, headers);
+        HttpEntity<LinkedMultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
 
-        return restTemplate.postForObject(
-                TOKEN_URL,
-                request,
-                MercadoLivreTokenResponse.class
-        );
+        try {
+            return restTemplate.postForObject(TOKEN_URL, request, MercadoLivreTokenResponse.class);
+        } catch (RestClientResponseException ex) {
+            String responseBody = ex.getResponseBodyAsString();
+            String message = responseBody == null || responseBody.isBlank()
+                    ? "Mercado Livre token request failed."
+                    : "Mercado Livre token request failed: " + responseBody;
+            throw new ExternalApiException(ex.getStatusCode(), message);
+        }
+    }
+
+    private void validateCredentials() {
+        if (clientId == null || clientId.isBlank() || clientSecret == null || clientSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "Mercado Livre credentials are not configured. Define MELI_CLIENT_ID and MELI_CLIENT_SECRET."
+            );
+        }
     }
 }

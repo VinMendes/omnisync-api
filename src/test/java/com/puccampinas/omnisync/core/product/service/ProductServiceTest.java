@@ -3,6 +3,7 @@ package com.puccampinas.omnisync.core.product.service;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,14 +37,16 @@ class ProductServiceTest {
 
     private ProductRepository productRepository;
     private ProductLogService productLogService;
+    private MercadoLivreListingService mercadoLivreListingService;
     private ProductService productService;
 
     @BeforeEach
     void setUp() {
         productRepository = mock(ProductRepository.class);
         productLogService = mock(ProductLogService.class);
-        productService = new ProductService(productRepository, productLogService);
-        reset(productRepository, productLogService);
+        mercadoLivreListingService = mock(MercadoLivreListingService.class);
+        productService = new ProductService(productRepository, productLogService, mercadoLivreListingService);
+        reset(productRepository, productLogService, mercadoLivreListingService);
     }
 
     @Test
@@ -266,6 +269,7 @@ class ProductServiceTest {
         assertTrue(result.isActive());
         assertNotNull(result.getCreatedAt());
         verify(productRepository).save(any(Product.class));
+        verify(mercadoLivreListingService).createListing(eq(1L), any(Product.class));
         verify(productLogService).logCreate(any(Product.class));
     }
 
@@ -335,6 +339,7 @@ class ProductServiceTest {
         assertEquals(1L, result.getSystemClientId());
         verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
         verify(productRepository).save(any(Product.class));
+        verify(mercadoLivreListingService).updateListing(eq(1L), eq(10L), eq("MLB123456789"), any(Product.class));
         verify(productLogService).logEdit(any(Product.class), any(Product.class));
     }
 
@@ -384,6 +389,7 @@ class ProductServiceTest {
         assertFalse(result.isActive());
         verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
         verify(productRepository).save(any(Product.class));
+        verify(mercadoLivreListingService).deleteListingByItemId(1L, "MLB123456789");
         verify(productLogService).logDelete(any(Product.class), any(Product.class));
     }
 
@@ -409,7 +415,7 @@ class ProductServiceTest {
         dto.setStock(10);
         dto.setReservedStock(2);
         dto.setPrice(new BigDecimal("99.90"));
-        dto.setResource(Map.of("color", "blue"));
+        dto.setResource(validResource());
         return dto;
     }
 
@@ -423,9 +429,22 @@ class ProductServiceTest {
         product.setStock(10);
         product.setReservedStock(2);
         product.setPrice(new BigDecimal("99.90"));
-        product.setResource(Map.of("color", "blue"));
+        product.setResource(validResource());
         product.setActive(true);
         return product;
+    }
+
+    private Map<String, Object> validResource() {
+        return Map.of(
+                "color", "blue",
+                "mercado_livre", Map.of(
+                        "item_id", "MLB123456789",
+                        "category_id", "MLB1055",
+                        "condition", "new",
+                        "pictures", List.of(Map.of("source", "https://example.com/product.jpg")),
+                        "attributes", List.of(Map.of("id", "BRAND", "value_name", "Test Brand"))
+                )
+        );
     }
 
     @FunctionalInterface

@@ -4,22 +4,30 @@ import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductLogService productLogService;
+    private final MercadoLivreListingService mercadoLivreListingService;
 
-    public ProductService(ProductRepository productRepository, ProductLogService productLogService) {
+    public ProductService(
+            ProductRepository productRepository,
+            ProductLogService productLogService,
+            MercadoLivreListingService mercadoLivreListingService
+    ) {
         this.productRepository = productRepository;
         this.productLogService = productLogService;
+        this.mercadoLivreListingService = mercadoLivreListingService;
     }
 
     @Transactional
@@ -33,6 +41,7 @@ public class ProductService {
         product.setActive(true);
 
         Product savedProduct = this.productRepository.save(product);
+        this.mercadoLivreListingService.createListing(systemClientId, savedProduct);
         this.productLogService.logCreate(savedProduct);
 
         return toDto(savedProduct);
@@ -79,6 +88,8 @@ public class ProductService {
         existing.setResource(data.getResource());
 
         Product updatedProduct = this.productRepository.save(existing);
+        String itemId = extractMercadoLivreItemId(updatedProduct);
+        this.mercadoLivreListingService.updateListing(systemClientId, id, itemId, updatedProduct);
         this.productLogService.logEdit(previousState, updatedProduct);
 
         return toDto(updatedProduct);
@@ -89,9 +100,11 @@ public class ProductService {
         validateIdentifiers(systemClientId, id);
         Product existing = findActiveById(systemClientId, id);
         Product previousState = copy(existing);
+        String itemId = extractMercadoLivreItemId(existing);
         existing.setActive(false);
 
         Product deletedProduct = this.productRepository.save(existing);
+        this.mercadoLivreListingService.deleteListingByItemId(systemClientId, itemId);
         this.productLogService.logDelete(previousState, deletedProduct);
 
         return toDto(deletedProduct);
@@ -152,6 +165,24 @@ public class ProductService {
         if (id == null) {
             throw new IllegalArgumentException("Id is required.");
         }
+    }
+
+    private String extractMercadoLivreItemId(Product product) {
+        if (product.getResource() == null) {
+            throw new IllegalArgumentException("Product resource must contain Mercado Livre item_id.");
+        }
+
+        Object mercadoLivre = product.getResource().get("mercado_livre");
+        if (!(mercadoLivre instanceof Map<?, ?> mercadoLivreMap)) {
+            throw new IllegalArgumentException("Product resource must contain Mercado Livre item_id.");
+        }
+
+        Object itemId = mercadoLivreMap.get("item_id");
+        if (itemId == null || String.valueOf(itemId).isBlank()) {
+            throw new IllegalArgumentException("Product resource must contain Mercado Livre item_id.");
+        }
+
+        return String.valueOf(itemId);
     }
 
     private void validator(ProductDto data, Long systemClientId) {

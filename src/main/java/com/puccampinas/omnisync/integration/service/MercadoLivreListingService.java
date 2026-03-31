@@ -26,7 +26,7 @@ public class MercadoLivreListingService {
     private static final String TEST_SITE_ID = "MLB";
     private static final String TEST_CURRENCY_ID = "BRL";
     private static final String TEST_BUYING_MODE = "buy_it_now";
-    private static final String TEST_LISTING_TYPE_ID = "bronze";
+    private static final String TEST_LISTING_TYPE_ID = "free";
     private static final String TEST_TITLE = "Item de Teste - Por Favor Nao Ofertar";
 
     private final MercadoLivreClient mercadoLivreClient;

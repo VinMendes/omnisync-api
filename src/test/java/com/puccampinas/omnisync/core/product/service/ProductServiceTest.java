@@ -344,6 +344,29 @@ class ProductServiceTest {
     }
 
     @Test
+    void updateShouldUseMercadoLivreItemIdStoredInDatabaseWhenPayloadDoesNotContainIt() {
+        Product existing = buildProduct(10L, 1L);
+        ProductDto dto = validDto();
+        dto.setResource(Map.of(
+                "color", "blue",
+                "mercado_livre", Map.of(
+                        "category_id", "MLB9206",
+                        "condition", "new",
+                        "pictures", List.of(Map.of("id", "MLA123")),
+                        "attributes", List.of(Map.of("id", "BRAND", "value_name", "Test Brand"))
+                )
+        ));
+
+        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(10L, 1L))
+                .thenReturn(Optional.of(existing));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        productService.update(1L, 10L, dto);
+
+        verify(mercadoLivreListingService).updateListing(eq(1L), eq(10L), eq("MLB123456789"), any(Product.class));
+    }
+
+    @Test
     void deleteShouldThrowWhenSystemClientIdAndIdAreNull() {
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
@@ -389,7 +412,7 @@ class ProductServiceTest {
         assertFalse(result.isActive());
         verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
         verify(productRepository).save(any(Product.class));
-        verify(mercadoLivreListingService).deleteListingByItemId(1L, "MLB123456789");
+        verify(mercadoLivreListingService).deleteListing(eq(1L), any(Product.class));
         verify(productLogService).logDelete(any(Product.class), any(Product.class));
     }
 

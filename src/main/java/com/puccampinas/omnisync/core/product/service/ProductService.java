@@ -78,6 +78,7 @@ public class ProductService {
 
         Product existing = findActiveById(systemClientId, id);
         Product previousState = copy(existing);
+        String itemId = extractMercadoLivreItemId(existing);
         existing.setSystemClientId(systemClientId);
         existing.setSku(data.getSku());
         existing.setName(data.getName());
@@ -85,10 +86,9 @@ public class ProductService {
         existing.setStock(data.getStock());
         existing.setReservedStock(data.getReservedStock());
         existing.setPrice(data.getPrice());
-        existing.setResource(data.getResource());
+        existing.setResource(mergeResourceForUpdate(existing.getResource(), data.getResource(), itemId));
 
         Product updatedProduct = this.productRepository.save(existing);
-        String itemId = extractMercadoLivreItemId(updatedProduct);
         this.mercadoLivreListingService.updateListing(systemClientId, id, itemId, updatedProduct);
         this.productLogService.logEdit(previousState, updatedProduct);
 
@@ -100,11 +100,10 @@ public class ProductService {
         validateIdentifiers(systemClientId, id);
         Product existing = findActiveById(systemClientId, id);
         Product previousState = copy(existing);
-        String itemId = extractMercadoLivreItemId(existing);
         existing.setActive(false);
 
         Product deletedProduct = this.productRepository.save(existing);
-        this.mercadoLivreListingService.deleteListingByItemId(systemClientId, itemId);
+        this.mercadoLivreListingService.deleteListing(systemClientId, deletedProduct);
         this.productLogService.logDelete(previousState, deletedProduct);
 
         return toDto(deletedProduct);
@@ -183,6 +182,49 @@ public class ProductService {
         }
 
         return String.valueOf(itemId);
+    }
+
+    private Map<String, Object> mergeResourceForUpdate(
+            Map<String, Object> currentResource,
+            Map<String, Object> incomingResource,
+            String itemId
+    ) {
+        Map<String, Object> merged = currentResource == null
+                ? new java.util.LinkedHashMap<>()
+                : new java.util.LinkedHashMap<>(currentResource);
+
+        if (incomingResource != null) {
+            for (Map.Entry<String, Object> entry : incomingResource.entrySet()) {
+                if (!"mercado_livre".equals(entry.getKey())) {
+                    merged.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
+        Map<String, Object> mercadoLivre = currentMercadoLivreResource(incomingResource);
+        mercadoLivre.put("item_id", itemId);
+
+        merged.put("mercado_livre", mercadoLivre);
+        return merged;
+    }
+
+    private Map<String, Object> currentMercadoLivreResource(Map<String, Object> resource) {
+        if (resource == null) {
+            return new java.util.LinkedHashMap<>();
+        }
+
+        Object mercadoLivre = resource.get("mercado_livre");
+        if (!(mercadoLivre instanceof Map<?, ?> mercadoLivreMap)) {
+            return new java.util.LinkedHashMap<>();
+        }
+
+        Map<String, Object> normalized = new java.util.LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : mercadoLivreMap.entrySet()) {
+            if (entry.getKey() != null) {
+                normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return normalized;
     }
 
     private void validator(ProductDto data, Long systemClientId) {

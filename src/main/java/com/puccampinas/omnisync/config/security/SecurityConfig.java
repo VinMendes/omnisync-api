@@ -97,7 +97,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/",
                                 "/api/auth/**",
-                                "/api/integrations/mercadolivre/callback"
+                                "/api/integrations/mercadolivre/callback",
+                                "/api/client"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

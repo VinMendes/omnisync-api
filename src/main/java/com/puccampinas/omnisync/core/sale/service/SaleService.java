@@ -18,7 +18,7 @@ public class SaleService {
     private final SystemClientRepository systemClientRepository;
     private final ProductRepository productRepository;
 
-    public  SaleService(SaleRepository saleRepository, SystemClientRepository systemClientRepository, ProductRepository productRepository) {
+    public SaleService(SaleRepository saleRepository, SystemClientRepository systemClientRepository, ProductRepository productRepository) {
         this.saleRepository = saleRepository;
         this.systemClientRepository = systemClientRepository;
         this.productRepository = productRepository;
@@ -26,18 +26,27 @@ public class SaleService {
 
     @Transactional
     public Sale createSale(SaleCreateRequest request) {
-        Long clientID = request.getSystemClientId(); // pode nao encontrar o id e gerar erro, testar o tratamento abaixo
+        Long clientID = request.getSystemClientId();
         SystemClient client = systemClientRepository.findById(clientID)
                 .orElseThrow(() -> new RuntimeException("Cliente nao encontrado com o ID: " + clientID));
 
-        Product product = productRepository.findById(request.getProductId())
-                .orElseThrow(() -> new RuntimeException("Produto não encontrado com ID: " + request.getProductId()));
+        // CORREÇÃO 1 e 2: Garante que o produto existe, está ATIVO e PERTENCE a este cliente
+        Product product = productRepository.findByIdAndSystemClientIdAndActiveTrue(request.getProductId(), clientID)
+                .orElseThrow(() -> new RuntimeException("Produto não encontrado, inativo ou não pertence a este cliente. ID: " + request.getProductId()));
 
+        // CORREÇÃO 3: Valida se há estoque suficiente
+        if (product.getStock() < request.getQuantity()) {
+            throw new RuntimeException("Estoque insuficiente para o produto: " + product.getName());
+        }
 
-        Sale sale = new Sale ();
+        // Dá baixa no estoque do produto
+        product.setStock(product.getStock() - request.getQuantity());
+        productRepository.save(product); // Salva o estoque atualizado
+
+        // Cria a venda
+        Sale sale = new Sale();
         sale.setSystemClient(client);
         sale.setProduct(product);
-
         sale.setQuantity(request.getQuantity());
         sale.setTotalValue(request.getTotalValue());
         sale.setChannel(request.getChannel());

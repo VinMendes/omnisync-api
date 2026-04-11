@@ -1,7 +1,11 @@
 package com.puccampinas.omnisync.integration.service;
 
 import com.puccampinas.omnisync.common.enums.Marketplace;
+import com.puccampinas.omnisync.core.systemClient.service.SystemClientService;
+import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.client.MercadoLivreClient;
+import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationResponse;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreTokenResponse;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
@@ -26,6 +30,8 @@ public class MercadoLivreAuthService {
 
     private final MercadoLivreClient client;
     private final MarketplaceIntegrationRepository repository;
+    private final SystemClientService systemClientService;
+    private final UserService userService;
     private final TextEncryptor encryptor;
 
     @Value("${mercadolivre.redirect-uri}")
@@ -40,44 +46,46 @@ public class MercadoLivreAuthService {
     public MercadoLivreAuthService(
             MercadoLivreClient client,
             MarketplaceIntegrationRepository repository,
+            SystemClientService systemClientService,
+            UserService userService,
             TextEncryptor encryptor
     ) {
         this.client = client;
         this.repository = repository;
+        this.systemClientService = systemClientService;
+        this.userService = userService;
         this.encryptor = encryptor;
     }
 
     public String generateAuthorizationUrl(Long systemClientId) {
+        validateSystemClient(systemClientId);
+
         String state = generateState(systemClientId);
         return client.buildAuthorizationUrl(redirectUri, state);
     }
 
     public Long handleCallback(String state, String code) {
         Long systemClientId = extractSystemClientIdFromState(state);
+        validateSystemClient(systemClientId);
 
-        MercadoLivreTokenResponse token =
-                client.exchangeCode(code, redirectUri);
+        MercadoLivreTokenResponse token = client.exchangeCode(code, redirectUri);
         validateTokenResponse(token);
 
-        MarketplaceIntegration integration =
-                repository.findBySystemClientIdAndMarketplace(
+        MarketplaceIntegration integration = repository.findBySystemClientIdAndMarketplace(
                         systemClientId,
                         Marketplace.MERCADO_LIVRE
-                ).orElse(new MarketplaceIntegration());
+                )
+                .orElseGet(MarketplaceIntegration::new);
 
         integration.setSystemClientId(systemClientId);
         integration.setMarketplace(Marketplace.MERCADO_LIVRE);
-        integration.setAccessToken(
-                encryptor.encrypt(token.getAccessToken())
-        );
-        if (token.getRefreshToken() != null) {
-            integration.setRefreshToken(
-                    encryptor.encrypt(token.getRefreshToken())
-            );
+        integration.setAccessToken(encryptor.encrypt(token.getAccessToken()));
+
+        if (token.getRefreshToken() != null && !token.getRefreshToken().isBlank()) {
+            integration.setRefreshToken(encryptor.encrypt(token.getRefreshToken()));
         }
-        integration.setExpiresAt(
-                LocalDateTime.now().plusSeconds(token.getExpiresIn())
-        );
+
+        integration.setExpiresAt(LocalDateTime.now().plusSeconds(token.getExpiresIn()));
         integration.setResource(buildResource(token));
         integration.setActive(true);
 
@@ -85,9 +93,50 @@ public class MercadoLivreAuthService {
         return systemClientId;
     }
 
+    public MercadoLivreIntegrationResponse exchangeCodeForAuthenticatedUser(
+            String authenticatedEmail,
+            String state,
+            String code
+    ) {
+        User authenticatedUser = userService.findActiveEntityByEmail(authenticatedEmail);
+        Long systemClientIdFromState = extractSystemClientIdFromState(state);
+
+        if (!authenticatedUser.getSystemClientId().equals(systemClientIdFromState)) {
+            throw new IllegalArgumentException(
+                    "OAuth state does not belong to the authenticated user's system client."
+            );
+        }
+
+        Long systemClientId = handleCallback(state, code);
+        MarketplaceIntegration integration = repository.findBySystemClientIdAndMarketplace(
+                        systemClientId,
+                        Marketplace.MERCADO_LIVRE
+                )
+                .orElseThrow(() -> new IllegalStateException(
+                        "Mercado Livre integration was not persisted for systemClientId=" + systemClientId
+                ));
+
+        return new MercadoLivreIntegrationResponse(
+                "Mercado Livre account connected successfully.",
+                systemClientId,
+                integration.getMarketplace(),
+                integration.getActive(),
+                integration.getExpiresAt(),
+                integration.getResource()
+        );
+    }
+
+    private void validateSystemClient(Long systemClientId) {
+        if (systemClientId == null) {
+            throw new IllegalArgumentException("systemClientId is required.");
+        }
+
+        systemClientService.getById(systemClientId);
+    }
+
     private void validateTokenResponse(MercadoLivreTokenResponse token) {
         if (token == null || token.getAccessToken() == null || token.getExpiresIn() == null) {
-            throw new IllegalArgumentException("Mercado Livre token response is invalid.");
+            throw new IllegalStateException("Mercado Livre token response is invalid.");
         }
     }
 
@@ -111,10 +160,7 @@ public class MercadoLivreAuthService {
 
     private Long extractSystemClientIdFromState(String state) {
         try {
-            String rawState = new String(
-                    Base64.getUrlDecoder().decode(state),
-                    StandardCharsets.UTF_8
-            );
+            String rawState = new String(Base64.getUrlDecoder().decode(state), StandardCharsets.UTF_8);
             String[] parts = rawState.split(":");
 
             if (parts.length != 4) {
@@ -138,27 +184,24 @@ public class MercadoLivreAuthService {
             }
 
             return Long.parseLong(parts[0]);
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalArgumentException("OAuth state could not be validated.", e);
+        } catch (IllegalArgumentException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("OAuth state could not be validated.", ex);
         }
     }
 
     private String sign(String payload) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec key = new SecretKeySpec(
-                    stateSecret.getBytes(StandardCharsets.UTF_8),
-                    "HmacSHA256"
-            );
+            SecretKeySpec key = new SecretKeySpec(stateSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             mac.init(key);
             byte[] signature = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(signature);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("HmacSHA256 algorithm is not available.", e);
-        } catch (Exception e) {
-            throw new IllegalStateException("Unable to sign OAuth state.", e);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("HmacSHA256 algorithm is not available.", ex);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to sign OAuth state.", ex);
         }
     }
 }

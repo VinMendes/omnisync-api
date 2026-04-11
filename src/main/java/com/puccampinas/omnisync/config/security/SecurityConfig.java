@@ -94,7 +94,12 @@ public class SecurityConfig {
                  * qualquer outra rota → exige autenticação
                  */
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/api/auth/**").permitAll()
+                        .requestMatchers(
+                                "/",
+                                "/api/auth/**",
+                                "/api/integrations/mercadolivre/callback",
+                                "/api/client"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
 

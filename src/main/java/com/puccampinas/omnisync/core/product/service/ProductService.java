@@ -4,22 +4,30 @@ import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductLogService productLogService;
+    private final MercadoLivreListingService mercadoLivreListingService;
 
-    public ProductService(ProductRepository productRepository, ProductLogService productLogService) {
+    public ProductService(
+            ProductRepository productRepository,
+            ProductLogService productLogService,
+            MercadoLivreListingService mercadoLivreListingService
+    ) {
         this.productRepository = productRepository;
         this.productLogService = productLogService;
+        this.mercadoLivreListingService = mercadoLivreListingService;
     }
 
     @Transactional
@@ -33,6 +41,7 @@ public class ProductService {
         product.setActive(true);
 
         Product savedProduct = this.productRepository.save(product);
+        this.mercadoLivreListingService.createListing(systemClientId, savedProduct);
         this.productLogService.logCreate(savedProduct);
 
         return toDto(savedProduct);
@@ -69,6 +78,7 @@ public class ProductService {
 
         Product existing = findActiveById(systemClientId, id);
         Product previousState = copy(existing);
+        String itemId = extractMercadoLivreItemId(existing);
         existing.setSystemClientId(systemClientId);
         existing.setSku(data.getSku());
         existing.setName(data.getName());
@@ -76,9 +86,10 @@ public class ProductService {
         existing.setStock(data.getStock());
         existing.setReservedStock(data.getReservedStock());
         existing.setPrice(data.getPrice());
-        existing.setResource(data.getResource());
+        existing.setResource(mergeResourceForUpdate(existing.getResource(), data.getResource(), itemId));
 
         Product updatedProduct = this.productRepository.save(existing);
+        this.mercadoLivreListingService.updateListing(systemClientId, id, itemId, updatedProduct);
         this.productLogService.logEdit(previousState, updatedProduct);
 
         return toDto(updatedProduct);
@@ -92,6 +103,7 @@ public class ProductService {
         existing.setActive(false);
 
         Product deletedProduct = this.productRepository.save(existing);
+        this.mercadoLivreListingService.deleteListing(systemClientId, deletedProduct);
         this.productLogService.logDelete(previousState, deletedProduct);
 
         return toDto(deletedProduct);
@@ -152,6 +164,67 @@ public class ProductService {
         if (id == null) {
             throw new IllegalArgumentException("Id is required.");
         }
+    }
+
+    private String extractMercadoLivreItemId(Product product) {
+        if (product.getResource() == null) {
+            throw new IllegalArgumentException("Product resource must contain Mercado Livre item_id.");
+        }
+
+        Object mercadoLivre = product.getResource().get("mercado_livre");
+        if (!(mercadoLivre instanceof Map<?, ?> mercadoLivreMap)) {
+            throw new IllegalArgumentException("Product resource must contain Mercado Livre item_id.");
+        }
+
+        Object itemId = mercadoLivreMap.get("item_id");
+        if (itemId == null || String.valueOf(itemId).isBlank()) {
+            throw new IllegalArgumentException("Product resource must contain Mercado Livre item_id.");
+        }
+
+        return String.valueOf(itemId);
+    }
+
+    private Map<String, Object> mergeResourceForUpdate(
+            Map<String, Object> currentResource,
+            Map<String, Object> incomingResource,
+            String itemId
+    ) {
+        Map<String, Object> merged = currentResource == null
+                ? new java.util.LinkedHashMap<>()
+                : new java.util.LinkedHashMap<>(currentResource);
+
+        if (incomingResource != null) {
+            for (Map.Entry<String, Object> entry : incomingResource.entrySet()) {
+                if (!"mercado_livre".equals(entry.getKey())) {
+                    merged.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
+        Map<String, Object> mercadoLivre = currentMercadoLivreResource(incomingResource);
+        mercadoLivre.put("item_id", itemId);
+
+        merged.put("mercado_livre", mercadoLivre);
+        return merged;
+    }
+
+    private Map<String, Object> currentMercadoLivreResource(Map<String, Object> resource) {
+        if (resource == null) {
+            return new java.util.LinkedHashMap<>();
+        }
+
+        Object mercadoLivre = resource.get("mercado_livre");
+        if (!(mercadoLivre instanceof Map<?, ?> mercadoLivreMap)) {
+            return new java.util.LinkedHashMap<>();
+        }
+
+        Map<String, Object> normalized = new java.util.LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : mercadoLivreMap.entrySet()) {
+            if (entry.getKey() != null) {
+                normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return normalized;
     }
 
     private void validator(ProductDto data, Long systemClientId) {

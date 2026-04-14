@@ -28,6 +28,11 @@ public class SystemClientController {
         return ResponseEntity.ok(this.service.getById(id));
     }
 
+    @GetMapping("/checkCNPJ/{document}")
+    public Boolean existsByCNPJ(@PathVariable String document) {
+        return service.existsByDocument(document);
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<SystemClient> update(@PathVariable long id, @RequestBody SystemClientUpdateRequest data) {
         return ResponseEntity.ok(this.service.update(id, data));

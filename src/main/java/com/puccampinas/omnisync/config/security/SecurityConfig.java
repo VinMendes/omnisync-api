@@ -99,7 +99,7 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/integrations/mercadolivre/callback",
                                 "/api/integrations/mercadolivre/webhooks/**",
-                                "/api/client"
+                                "/api/client/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

@@ -33,6 +33,10 @@ public class SystemClientService {
         return findActiveById(id);
     }
 
+    public boolean existsByDocument(String document) {
+        return findClientByDocument(document);
+    }
+
     public SystemClient update(long id, SystemClientUpdateRequest data) {
         SystemClient existing = findActiveById(id);
 
@@ -88,6 +92,10 @@ public class SystemClientService {
     private SystemClient findActiveById(long id) {
         return this.repository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new EntityNotFoundException("Active client not found for id=" + id));
+    }
+
+    private Boolean findClientByDocument(String document) {
+        return this.repository.existsByDocument(document);
     }
 
     private String validateForCreate(SystemClientCreateRequest data) {

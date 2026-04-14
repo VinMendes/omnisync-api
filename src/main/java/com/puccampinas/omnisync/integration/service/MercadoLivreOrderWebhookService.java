@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,7 @@ public class MercadoLivreOrderWebhookService {
     private static final String CHANNEL = "MERCADO_LIVRE";
     private static final String TOPIC_ORDERS_V2 = "orders_v2";
     private static final String STATUS_CONFIRMED = "CONFIRMED";
+    private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_CANCELLED = "CANCELLED";
 
     private final MarketplaceIntegrationRepository marketplaceIntegrationRepository;
@@ -68,27 +70,55 @@ public class MercadoLivreOrderWebhookService {
         Long systemClientId = integration.getSystemClientId();
         String accessToken = marketplaceTokenService.getValidAccessToken(systemClientId, Marketplace.MERCADO_LIVRE);
         Map<String, Object> order = mercadoLivreClient.getOrder(accessToken, orderId);
-        OrderContext context = extractOrderContext(order);
-
-        Product product = productRepository
-                .findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(systemClientId, context.itemId())
-                .orElseThrow(() -> new EntityNotFoundException(
-                        "Active product not found for Mercado Livre item_id=" + context.itemId()
-                                + " and systemClientId=" + systemClientId
-                ));
-
-        Optional<Sale> existingSale = saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(
-                systemClientId,
-                CHANNEL,
-                orderId
-        );
-
         String normalizedStatus = normalizeSaleStatus(order);
-        if (existingSale.isPresent()) {
-            return updateExistingSale(existingSale.get(), product, order, notification, normalizedStatus, context);
+        List<OrderLineContext> lineContexts = extractOrderContexts(order);
+        List<Map<String, Object>> lineResults = new ArrayList<>();
+
+        for (OrderLineContext context : lineContexts) {
+            Product product = productRepository
+                    .findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(systemClientId, context.itemId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "Active product not found for Mercado Livre item_id=" + context.itemId()
+                                    + " and systemClientId=" + systemClientId
+                    ));
+
+            String externalReferenceId = buildExternalReferenceId(orderId, context.itemId());
+            Optional<Sale> existingSale = saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(
+                    systemClientId,
+                    CHANNEL,
+                    externalReferenceId
+            );
+
+            if (existingSale.isPresent()) {
+                lineResults.add(updateExistingSale(
+                        existingSale.get(),
+                        product,
+                        orderId,
+                        order,
+                        notification,
+                        normalizedStatus,
+                        context
+                ));
+                continue;
+            }
+
+            lineResults.add(createSale(
+                    product,
+                    orderId,
+                    order,
+                    notification,
+                    normalizedStatus,
+                    context
+            ));
         }
 
-        return createSale(product, orderId, order, notification, normalizedStatus, context);
+        return Map.of(
+                "processed", true,
+                "order_id", orderId,
+                "sale_status", normalizedStatus,
+                "items_processed", lineResults.size(),
+                "lines", lineResults
+        );
     }
 
     private Map<String, Object> createSale(
@@ -97,59 +127,51 @@ public class MercadoLivreOrderWebhookService {
             Map<String, Object> order,
             MercadoLivreNotificationRequest notification,
             String normalizedStatus,
-            OrderContext context
+            OrderLineContext context
     ) {
-        if (STATUS_CANCELLED.equals(normalizedStatus)) {
-            Sale cancelledSale = buildSale(product, orderId, order, normalizedStatus, context);
-            Sale savedSale = saleRepository.save(cancelledSale);
-            saleLogService.logCreated(savedSale, Map.of(
-                    "notification", notificationSnapshot(notification),
-                    "stock_changed", false
-            ));
-            return buildResult(savedSale, product, false);
-        }
-
         int previousStock = product.getStock();
-        int newStock = previousStock - context.quantity();
-        if (newStock < 0) {
-            throw new IllegalArgumentException(
-                    "Order quantity exceeds current stock for product id=" + product.getId()
-            );
-        }
+        int stockDelta = committedQuantity(normalizedStatus, context.quantity());
+        int newStock = previousStock - stockDelta;
 
-        product.setStock(newStock);
-        productRepository.save(product);
+        if (stockDelta != 0) {
+            product.setStock(newStock);
+            productRepository.save(product);
+        }
 
         Sale sale = buildSale(product, orderId, order, normalizedStatus, context);
         Sale savedSale = saleRepository.save(sale);
-        saleLogService.logCreated(savedSale, saleLogService.stockMetadata(
+        Map<String, Object> metadata = saleLogService.stockMetadata(
                 previousStock,
                 newStock,
                 context.quantity(),
                 notificationSnapshot(notification)
-        ));
+        );
+        metadata.put("stock_delta", stockDelta);
+        metadata.put("stock_inconsistency", newStock < 0);
+        saleLogService.logCreated(savedSale, metadata);
 
-        return buildResult(savedSale, product, true);
+        return buildResult(savedSale, product, stockDelta != 0, orderId, context.itemId());
     }
 
     private Map<String, Object> updateExistingSale(
             Sale sale,
             Product product,
+            String orderId,
             Map<String, Object> order,
             MercadoLivreNotificationRequest notification,
             String normalizedStatus,
-            OrderContext context
+            OrderLineContext context
     ) {
         String previousStatus = sale.getStatus();
-        boolean stockChanged = false;
         int previousStock = product.getStock();
-        int newStock = previousStock;
+        int previousCommittedQuantity = committedQuantity(previousStatus, sale.getQuantity());
+        int currentCommittedQuantity = committedQuantity(normalizedStatus, context.quantity());
+        int committedDelta = currentCommittedQuantity - previousCommittedQuantity;
+        int newStock = previousStock - committedDelta;
 
-        if (!STATUS_CANCELLED.equals(previousStatus) && STATUS_CANCELLED.equals(normalizedStatus)) {
-            newStock = previousStock + safeQuantity(sale.getQuantity());
+        if (committedDelta != 0) {
             product.setStock(newStock);
             productRepository.save(product);
-            stockChanged = true;
         }
 
         sale.setQuantity(context.quantity());
@@ -165,6 +187,8 @@ public class MercadoLivreOrderWebhookService {
                 notificationSnapshot(notification)
         );
         metadata.put("previous_sale_status", previousStatus);
+        metadata.put("stock_delta", committedDelta);
+        metadata.put("stock_inconsistency", newStock < 0);
 
         if (!previousStatus.equals(normalizedStatus)) {
             if (STATUS_CANCELLED.equals(normalizedStatus)) {
@@ -172,9 +196,11 @@ public class MercadoLivreOrderWebhookService {
             } else {
                 saleLogService.logUpdated(savedSale, previousStatus, metadata);
             }
+        } else if (committedDelta != 0 || sale.getQuantity() != context.quantity()) {
+            saleLogService.logUpdated(savedSale, previousStatus, metadata);
         }
 
-        return buildResult(savedSale, product, stockChanged);
+        return buildResult(savedSale, product, committedDelta != 0, orderId, context.itemId());
     }
 
     private Sale buildSale(
@@ -182,7 +208,7 @@ public class MercadoLivreOrderWebhookService {
             String orderId,
             Map<String, Object> order,
             String normalizedStatus,
-            OrderContext context
+            OrderLineContext context
     ) {
         Sale sale = new Sale();
         sale.setSystemClientId(product.getSystemClientId());
@@ -190,13 +216,13 @@ public class MercadoLivreOrderWebhookService {
         sale.setQuantity(context.quantity());
         sale.setTotalValue(context.totalValue());
         sale.setChannel(CHANNEL);
-        sale.setExternalReferenceId(orderId);
+        sale.setExternalReferenceId(buildExternalReferenceId(orderId, context.itemId()));
         sale.setStatus(normalizedStatus);
         sale.setResource(buildSaleResource(product, order, context));
         return sale;
     }
 
-    private Map<String, Object> buildSaleResource(Product product, Map<String, Object> order, OrderContext context) {
+    private Map<String, Object> buildSaleResource(Product product, Map<String, Object> order, OrderLineContext context) {
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("channel", CHANNEL);
         resource.put("mercado_livre_item_id", context.itemId());
@@ -215,12 +241,20 @@ public class MercadoLivreOrderWebhookService {
         return resource;
     }
 
-    private Map<String, Object> buildResult(Sale sale, Product product, boolean stockChanged) {
+    private Map<String, Object> buildResult(
+            Sale sale,
+            Product product,
+            boolean stockChanged,
+            String orderId,
+            String itemId
+    ) {
         return Map.of(
                 "processed", true,
                 "sale_id", sale.getId(),
                 "product_id", product.getId(),
-                "order_id", sale.getExternalReferenceId(),
+                "order_id", orderId,
+                "item_id", itemId,
+                "external_reference_id", sale.getExternalReferenceId(),
                 "sale_status", sale.getStatus(),
                 "stock", product.getStock(),
                 "stock_changed", stockChanged
@@ -263,56 +297,59 @@ public class MercadoLivreOrderWebhookService {
     }
 
     @SuppressWarnings("unchecked")
-    private OrderContext extractOrderContext(Map<String, Object> order) {
+    private List<OrderLineContext> extractOrderContexts(Map<String, Object> order) {
         Object orderItemsObject = order.get("order_items");
         if (!(orderItemsObject instanceof List<?> orderItems) || orderItems.isEmpty()) {
             throw new IllegalArgumentException("Mercado Livre order does not contain order_items.");
         }
 
-        Object firstItemObject = orderItems.getFirst();
-        if (!(firstItemObject instanceof Map<?, ?> firstItem)) {
-            throw new IllegalArgumentException("Mercado Livre order item payload is invalid.");
-        }
-
-        Object itemObject = firstItem.get("item");
-        if (!(itemObject instanceof Map<?, ?> itemMap)) {
-            throw new IllegalArgumentException("Mercado Livre order item is missing item data.");
-        }
-
-        String itemId = stringValue(itemMap.get("id"));
-        if (itemId == null || itemId.isBlank()) {
-            throw new IllegalArgumentException("Mercado Livre order item id is required.");
-        }
-
-        Integer quantity = integerValue(firstItem.get("quantity"));
-        if (quantity == null || quantity <= 0) {
-            throw new IllegalArgumentException("Mercado Livre order quantity is invalid.");
-        }
-
-        BigDecimal totalValue = decimalValue(order.get("total_amount"));
-        if (totalValue == null) {
-            BigDecimal unitPrice = decimalValue(firstItem.get("unit_price"));
-            if (unitPrice == null) {
-                throw new IllegalArgumentException("Mercado Livre order total_amount is invalid.");
+        List<OrderLineContext> contexts = new ArrayList<>();
+        for (Object orderItemObject : orderItems) {
+            if (!(orderItemObject instanceof Map<?, ?> orderItem)) {
+                throw new IllegalArgumentException("Mercado Livre order item payload is invalid.");
             }
-            totalValue = unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()));
+
+            Object itemObject = orderItem.get("item");
+            if (!(itemObject instanceof Map<?, ?> itemMap)) {
+                throw new IllegalArgumentException("Mercado Livre order item is missing item data.");
+            }
+
+            String itemId = stringValue(itemMap.get("id"));
+            if (itemId == null || itemId.isBlank()) {
+                throw new IllegalArgumentException("Mercado Livre order item id is required.");
+            }
+
+            Integer quantity = integerValue(orderItem.get("quantity"));
+            if (quantity == null || quantity <= 0) {
+                throw new IllegalArgumentException("Mercado Livre order quantity is invalid.");
+            }
+
+            BigDecimal unitPrice = decimalValue(orderItem.get("unit_price"));
+            if (unitPrice == null) {
+                throw new IllegalArgumentException("Mercado Livre order item unit_price is invalid.");
+            }
+
+            contexts.add(new OrderLineContext(
+                    itemId,
+                    quantity,
+                    unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()))
+            ));
         }
 
-        return new OrderContext(itemId, quantity, totalValue);
+        return contexts;
     }
 
     private String normalizeSaleStatus(Map<String, Object> order) {
         String orderStatus = stringValue(order.get("status"));
-        if (orderStatus == null) {
-            return STATUS_CONFIRMED;
-        }
-
-        String normalized = orderStatus.trim().toLowerCase();
-        if (normalized.contains("cancel")) {
+        if (isCancelledStatus(orderStatus)) {
             return STATUS_CANCELLED;
         }
 
-        return STATUS_CONFIRMED;
+        if (isConfirmedStatus(orderStatus, order.get("tags"))) {
+            return STATUS_CONFIRMED;
+        }
+
+        return STATUS_PENDING;
     }
 
     private Map<String, Object> notificationSnapshot(MercadoLivreNotificationRequest notification) {
@@ -329,6 +366,44 @@ public class MercadoLivreOrderWebhookService {
 
     private Integer safeQuantity(Integer quantity) {
         return quantity == null ? 0 : quantity;
+    }
+
+    private int committedQuantity(String saleStatus, Integer quantity) {
+        if (!STATUS_CONFIRMED.equals(saleStatus)) {
+            return 0;
+        }
+        return safeQuantity(quantity);
+    }
+
+    private boolean isCancelledStatus(String orderStatus) {
+        if (orderStatus == null) {
+            return false;
+        }
+        return orderStatus.trim().toLowerCase().contains("cancel");
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean isConfirmedStatus(String orderStatus, Object tagsObject) {
+        if (orderStatus != null) {
+            String normalizedStatus = orderStatus.trim().toLowerCase();
+            if ("paid".equals(normalizedStatus) || "confirmed".equals(normalizedStatus)) {
+                return true;
+            }
+        }
+
+        if (tagsObject instanceof List<?> tags) {
+            for (Object tag : tags) {
+                if ("paid".equalsIgnoreCase(String.valueOf(tag))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private String buildExternalReferenceId(String orderId, String itemId) {
+        return orderId + ":" + itemId;
     }
 
     private String stringValue(Object value) {
@@ -363,6 +438,6 @@ public class MercadoLivreOrderWebhookService {
         return null;
     }
 
-    private record OrderContext(String itemId, Integer quantity, BigDecimal totalValue) {
+    private record OrderLineContext(String itemId, Integer quantity, BigDecimal totalValue) {
     }
 }

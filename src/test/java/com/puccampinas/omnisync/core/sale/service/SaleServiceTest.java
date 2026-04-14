@@ -1,131 +1,107 @@
 package com.puccampinas.omnisync.core.sale.service;
 
-import com.puccampinas.omnisync.core.product.entity.Product;
-import com.puccampinas.omnisync.core.product.repository.ProductRepository;
-import com.puccampinas.omnisync.core.sale.dto.SaleCreateRequest;
+import com.puccampinas.omnisync.core.sale.dto.SaleDto;
 import com.puccampinas.omnisync.core.sale.entity.Sale;
-import com.puccampinas.omnisync.core.sale.enums.SaleChannel;
-import com.puccampinas.omnisync.core.sale.enums.SaleStatus;
+import com.puccampinas.omnisync.core.sale.entity.SaleLog;
+import com.puccampinas.omnisync.core.sale.repository.SaleLogRepository;
 import com.puccampinas.omnisync.core.sale.repository.SaleRepository;
-import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
-import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
-import org.junit.jupiter.api.DisplayName;
+import jakarta.persistence.EntityNotFoundException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class) // Liga a mágica automática dos Mocks
-@DisplayName("Testes do Serviço de Vendas (SaleService)")
 class SaleServiceTest {
 
-    @Mock
     private SaleRepository saleRepository;
-
-    @Mock
-    private SystemClientRepository systemClientRepository;
-
-    @Mock
-    private ProductRepository productRepository;
-
-    @InjectMocks // Injeta os repositórios falsos acima diretamente no SaleService
+    private SaleLogRepository saleLogRepository;
     private SaleService saleService;
 
-    @Test
-    @DisplayName("Deve bloquear a venda se o Cliente não existir")
-    void createSaleShouldThrowExceptionWhenClientNotFound() {
-        SaleCreateRequest request = validRequest();
-
-        when(systemClientRepository.findById(request.getSystemClientId())).thenReturn(Optional.empty());
-
-        RuntimeException error = assertThrows(RuntimeException.class, () -> saleService.createSale(request));
-        assertEquals("Cliente nao encontrado com o ID: 1", error.getMessage());
-        verifyNoInteractions(saleRepository);
+    @BeforeEach
+    void setUp() {
+        saleRepository = mock(SaleRepository.class);
+        saleLogRepository = mock(SaleLogRepository.class);
+        saleService = new SaleService(saleRepository, saleLogRepository);
     }
 
     @Test
-    @DisplayName("Deve bloquear a venda se o Produto for de outro cliente, não existir ou estiver inativo")
-    void createSaleShouldThrowExceptionWhenProductIsInvalid() {
-        SaleCreateRequest request = validRequest();
-        SystemClient mockClient = new SystemClient();
+    void getAllShouldReturnSalesPage() {
+        Sale sale = buildSale();
+        when(saleRepository.findAllBySystemClientId(any(Long.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(sale)));
 
-        when(systemClientRepository.findById(request.getSystemClientId())).thenReturn(Optional.of(mockClient));
-        // Note que agora mockamos o novo método de busca!
-        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(request.getProductId(), request.getSystemClientId()))
-                .thenReturn(Optional.empty());
+        Page<SaleDto> result = saleService.getAll(1L, 0, 20);
 
-        RuntimeException error = assertThrows(RuntimeException.class, () -> saleService.createSale(request));
-        assertTrue(error.getMessage().contains("Produto não encontrado, inativo ou não pertence a este cliente"));
-        verifyNoInteractions(saleRepository);
+        assertEquals(1, result.getTotalElements());
+        assertEquals(10L, result.getContent().getFirst().getId());
+        verify(saleRepository).findAllBySystemClientId(
+                argThat(id -> id.equals(1L)),
+                argThat(pageable -> pageable.getOffset() == 0 && pageable.getPageSize() == 20)
+        );
+        verifyNoInteractions(saleLogRepository);
     }
 
     @Test
-    @DisplayName("Deve bloquear a venda se não houver estoque suficiente")
-    void createSaleShouldThrowExceptionWhenStockIsInsufficient() {
-        SaleCreateRequest request = validRequest();
-        request.setQuantity(10); // Usuário quer comprar 10
+    void getByIdShouldReturnSaleWithLogs() {
+        Sale sale = buildSale();
+        SaleLog log = new SaleLog();
+        log.setId(1L);
+        log.setSaleId(10L);
+        log.setSystemClientId(1L);
+        log.setAction("CREATED");
+        log.setNewStatus("CONFIRMED");
+        log.setCreatedAt(LocalDateTime.of(2026, 4, 13, 10, 0));
 
-        SystemClient mockClient = new SystemClient();
-        Product mockProduct = new Product();
-        mockProduct.setName("Teclado");
-        mockProduct.setStock(5); // Mas só temos 5 no estoque!
+        when(saleRepository.findByIdAndSystemClientId(10L, 1L)).thenReturn(Optional.of(sale));
+        when(saleLogRepository.findAllBySaleIdOrderByCreatedAtAsc(10L)).thenReturn(List.of(log));
 
-        when(systemClientRepository.findById(request.getSystemClientId())).thenReturn(Optional.of(mockClient));
-        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(request.getProductId(), request.getSystemClientId()))
-                .thenReturn(Optional.of(mockProduct));
+        SaleDto result = saleService.getById(1L, 10L);
 
-        RuntimeException error = assertThrows(RuntimeException.class, () -> saleService.createSale(request));
-        assertEquals("Estoque insuficiente para o produto: Teclado", error.getMessage());
-        verifyNoInteractions(saleRepository); // A venda não pode ser salva
+        assertEquals(10L, result.getId());
+        assertEquals(1, result.getLogs().size());
+        assertEquals("CREATED", result.getLogs().getFirst().getAction());
     }
 
     @Test
-    @DisplayName("Deve salvar a venda e descontar o estoque quando os dados forem válidos")
-    void createSaleShouldReturnSavedSaleAndDeductStock() {
-        SaleCreateRequest request = validRequest();
-        request.setQuantity(2);
+    void getByIdShouldThrowWhenSaleDoesNotExist() {
+        when(saleRepository.findByIdAndSystemClientId(99L, 1L)).thenReturn(Optional.empty());
 
-        SystemClient mockClient = new SystemClient();
-        Product mockProduct = new Product();
-        mockProduct.setStock(10); // Começa com 10 no estoque
+        EntityNotFoundException error = assertThrows(
+                EntityNotFoundException.class,
+                () -> saleService.getById(1L, 99L)
+        );
 
-        when(systemClientRepository.findById(request.getSystemClientId())).thenReturn(Optional.of(mockClient));
-        when(productRepository.findByIdAndSystemClientIdAndActiveTrue(request.getProductId(), request.getSystemClientId()))
-                .thenReturn(Optional.of(mockProduct));
-
-        when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> {
-            Sale saleToSave = invocation.getArgument(0);
-            saleToSave.setId(99L);
-            return saleToSave;
-        });
-
-        Sale result = saleService.createSale(request);
-
-        assertNotNull(result);
-        assertEquals(99L, result.getId());
-        assertEquals(SaleStatus.CONFIRMED, result.getStatus());
-
-        // Verifica se o estoque foi atualizado (10 - 2 = 8)
-        assertEquals(8, mockProduct.getStock());
-        verify(productRepository, times(1)).save(mockProduct);
-        verify(saleRepository, times(1)).save(any(Sale.class));
+        assertEquals("Sale not found for id=99 and systemClientId=1", error.getMessage());
     }
 
-    private SaleCreateRequest validRequest() {
-        SaleCreateRequest request = new SaleCreateRequest();
-        request.setSystemClientId(1L);
-        request.setProductId(10L);
-        request.setQuantity(2);
-        request.setTotalValue(new BigDecimal("150.50"));
-        request.setChannel(SaleChannel.PHYSICAL);
-        return request;
+    private Sale buildSale() {
+        Sale sale = new Sale();
+        sale.setId(10L);
+        sale.setSystemClientId(1L);
+        sale.setProductId(20L);
+        sale.setQuantity(2);
+        sale.setTotalValue(new BigDecimal("59.80"));
+        sale.setChannel("MERCADO_LIVRE");
+        sale.setExternalReferenceId("2001:MLB123");
+        sale.setStatus("CONFIRMED");
+        sale.setCreatedAt(LocalDateTime.of(2026, 4, 13, 10, 0));
+        sale.setResource(Map.of("mercado_livre_order_id", "2001"));
+        return sale;
     }
 }

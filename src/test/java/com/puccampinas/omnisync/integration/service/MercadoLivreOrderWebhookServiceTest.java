@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -78,7 +79,7 @@ class MercadoLivreOrderWebhookServiceTest {
                 .thenReturn(buildOrder("paid"));
         when(productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(1L, "MLB123"))
                 .thenReturn(Optional.of(product));
-        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2001"))
+        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2001:MLB123"))
                 .thenReturn(Optional.empty());
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(saleRepository.save(any(Sale.class))).thenReturn(savedSale);
@@ -88,6 +89,7 @@ class MercadoLivreOrderWebhookServiceTest {
         assertTrue((Boolean) result.get("processed"));
         assertEquals(8, product.getStock());
         assertEquals("CONFIRMED", result.get("sale_status"));
+        assertEquals(1, result.get("items_processed"));
         verify(productRepository).save(product);
         verify(saleRepository).save(any(Sale.class));
         verify(saleLogService).logCreated(eq(savedSale), any(Map.class));
@@ -116,7 +118,7 @@ class MercadoLivreOrderWebhookServiceTest {
                 .thenReturn(buildOrder("paid"));
         when(productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(1L, "MLB123"))
                 .thenReturn(Optional.of(product));
-        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2001"))
+        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2001:MLB123"))
                 .thenReturn(Optional.of(existingSale));
         when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -126,6 +128,130 @@ class MercadoLivreOrderWebhookServiceTest {
         assertEquals(10, product.getStock());
         verify(productRepository, never()).save(any(Product.class));
         verify(saleLogService, never()).logCreated(any(Sale.class), any(Map.class));
+    }
+
+    @Test
+    void handleNotificationShouldKeepPendingSaleWithoutDiscountingStock() {
+        MarketplaceIntegration integration = buildIntegration();
+        Product product = buildProduct();
+        Sale savedSale = buildSale(55L, "PENDING");
+        MercadoLivreNotificationRequest notification = new MercadoLivreNotificationRequest(
+                "/orders/2002",
+                123456789L,
+                "orders_v2",
+                999L,
+                1,
+                "2026-04-13T10:10:00Z",
+                "2026-04-13T10:10:01Z"
+        );
+
+        when(marketplaceIntegrationRepository.findByMarketplaceUserIdAndMarketplaceAndActiveTrue("123456789", "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(marketplaceTokenService.getValidAccessToken(1L, Marketplace.MERCADO_LIVRE))
+                .thenReturn("token");
+        when(mercadoLivreClient.getOrder("token", "2002"))
+                .thenReturn(buildPendingOrder());
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(1L, "MLB123"))
+                .thenReturn(Optional.of(product));
+        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2002:MLB123"))
+                .thenReturn(Optional.empty());
+        when(saleRepository.save(any(Sale.class))).thenReturn(savedSale);
+
+        Map<String, Object> result = service.handleNotification(notification);
+
+        assertTrue((Boolean) result.get("processed"));
+        assertEquals("PENDING", result.get("sale_status"));
+        assertEquals(10, product.getStock());
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
+    @Test
+    void handleNotificationShouldAdjustStockWhenConfirmedQuantityChanges() {
+        MarketplaceIntegration integration = buildIntegration();
+        Product product = buildProduct();
+        Sale existingSale = buildSale(55L, "CONFIRMED");
+        existingSale.setQuantity(1);
+        existingSale.setExternalReferenceId("2003:MLB123");
+        product.setStock(9);
+
+        MercadoLivreNotificationRequest notification = new MercadoLivreNotificationRequest(
+                "/orders/2003",
+                123456789L,
+                "orders_v2",
+                999L,
+                2,
+                "2026-04-13T10:20:00Z",
+                "2026-04-13T10:20:01Z"
+        );
+
+        when(marketplaceIntegrationRepository.findByMarketplaceUserIdAndMarketplaceAndActiveTrue("123456789", "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(marketplaceTokenService.getValidAccessToken(1L, Marketplace.MERCADO_LIVRE))
+                .thenReturn("token");
+        when(mercadoLivreClient.getOrder("token", "2003"))
+                .thenReturn(buildOrder("paid"));
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(1L, "MLB123"))
+                .thenReturn(Optional.of(product));
+        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2003:MLB123"))
+                .thenReturn(Optional.of(existingSale));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Map<String, Object> result = service.handleNotification(notification);
+
+        assertTrue((Boolean) result.get("processed"));
+        assertEquals(8, product.getStock());
+        verify(productRepository).save(product);
+        verify(saleLogService).logUpdated(any(Sale.class), eq("CONFIRMED"), any(Map.class));
+    }
+
+    @Test
+    void handleNotificationShouldProcessMultipleOrderItems() {
+        MarketplaceIntegration integration = buildIntegration();
+        Product productA = buildProduct();
+        Product productB = buildProduct();
+        productB.setId(11L);
+        productB.setSku("SKU-2");
+        productB.setResource(Map.of("mercado_livre", Map.of("item_id", "MLB456")));
+
+        Sale saleA = buildSale(55L, "CONFIRMED");
+        Sale saleB = buildSale(56L, "CONFIRMED");
+        saleB.setProductId(11L);
+        saleB.setExternalReferenceId("2004:MLB456");
+
+        MercadoLivreNotificationRequest notification = new MercadoLivreNotificationRequest(
+                "/orders/2004",
+                123456789L,
+                "orders_v2",
+                999L,
+                1,
+                "2026-04-13T10:30:00Z",
+                "2026-04-13T10:30:01Z"
+        );
+
+        when(marketplaceIntegrationRepository.findByMarketplaceUserIdAndMarketplaceAndActiveTrue("123456789", "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(marketplaceTokenService.getValidAccessToken(1L, Marketplace.MERCADO_LIVRE))
+                .thenReturn("token");
+        when(mercadoLivreClient.getOrder("token", "2004"))
+                .thenReturn(buildMultiItemOrder());
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(1L, "MLB123"))
+                .thenReturn(Optional.of(productA));
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(1L, "MLB456"))
+                .thenReturn(Optional.of(productB));
+        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2004:MLB123"))
+                .thenReturn(Optional.empty());
+        when(saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(1L, "MERCADO_LIVRE", "2004:MLB456"))
+                .thenReturn(Optional.empty());
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(saleRepository.save(any(Sale.class))).thenReturn(saleA, saleB);
+
+        Map<String, Object> result = service.handleNotification(notification);
+
+        assertTrue((Boolean) result.get("processed"));
+        assertEquals(2, result.get("items_processed"));
+        assertEquals(8, productA.getStock());
+        assertEquals(9, productB.getStock());
     }
 
     private MarketplaceIntegration buildIntegration() {
@@ -164,7 +290,7 @@ class MercadoLivreOrderWebhookServiceTest {
         sale.setQuantity(2);
         sale.setTotalValue(new BigDecimal("59.80"));
         sale.setChannel("MERCADO_LIVRE");
-        sale.setExternalReferenceId("2001");
+        sale.setExternalReferenceId("2001:MLB123");
         sale.setStatus(status);
         sale.setResource(Map.of());
         return sale;
@@ -183,6 +309,50 @@ class MercadoLivreOrderWebhookServiceTest {
                                 "item", Map.of(
                                         "id", "MLB123",
                                         "title", "Caneca preta"
+                                )
+                        )
+                )
+        );
+    }
+
+    private Map<String, Object> buildPendingOrder() {
+        return Map.of(
+                "id", 2002L,
+                "status", "payment_required",
+                "tags", List.of("not_paid"),
+                "order_items", List.of(
+                        Map.of(
+                                "quantity", 2,
+                                "unit_price", new BigDecimal("29.90"),
+                                "item", Map.of(
+                                        "id", "MLB123",
+                                        "title", "Caneca preta"
+                                )
+                        )
+                )
+        );
+    }
+
+    private Map<String, Object> buildMultiItemOrder() {
+        return Map.of(
+                "id", 2004L,
+                "status", "paid",
+                "tags", List.of("paid"),
+                "order_items", List.of(
+                        Map.of(
+                                "quantity", 2,
+                                "unit_price", new BigDecimal("29.90"),
+                                "item", Map.of(
+                                        "id", "MLB123",
+                                        "title", "Caneca preta"
+                                )
+                        ),
+                        Map.of(
+                                "quantity", 1,
+                                "unit_price", new BigDecimal("19.90"),
+                                "item", Map.of(
+                                        "id", "MLB456",
+                                        "title", "Copo"
                                 )
                         )
                 )

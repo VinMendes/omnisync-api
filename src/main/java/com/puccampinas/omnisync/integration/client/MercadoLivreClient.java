@@ -96,6 +96,25 @@ public class MercadoLivreClient {
         );
     }
 
+    public Map<String, Object> getOrder(String accessToken, String orderId) {
+        if (orderId == null || orderId.isBlank()) {
+            throw new IllegalArgumentException("Mercado Livre order id is required.");
+        }
+
+        String url = UriComponentsBuilder.fromUriString(API_URL + "/orders/" + orderId)
+                .queryParam("x-format-new", "true")
+                .toUriString();
+
+        return exchange(
+                HttpMethod.GET,
+                url,
+                accessToken,
+                null,
+                new ParameterizedTypeReference<>() {
+                }
+        );
+    }
+
     public List<Map<String, Object>> getItems(String accessToken, List<String> itemIds) {
         if (itemIds == null || itemIds.isEmpty()) {
             throw new IllegalArgumentException("At least one Mercado Livre item id is required.");

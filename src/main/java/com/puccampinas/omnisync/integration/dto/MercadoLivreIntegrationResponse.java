@@ -11,6 +11,7 @@ public record MercadoLivreIntegrationResponse(
         Marketplace marketplace,
         Boolean active,
         LocalDateTime expiresAt,
-        Map<String, Object> resource
+        Map<String, Object> resource,
+        String accessToken
 ) {
 }

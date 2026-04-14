@@ -122,7 +122,8 @@ public class MercadoLivreAuthService {
                 integration.getMarketplace(),
                 integration.getActive(),
                 integration.getExpiresAt(),
-                integration.getResource()
+                integration.getResource(),
+                encryptor.decrypt(integration.getAccessToken())
         );
     }
 

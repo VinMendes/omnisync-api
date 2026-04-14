@@ -3,6 +3,8 @@ package com.puccampinas.omnisync.integration.repository;
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -18,5 +20,21 @@ public interface MarketplaceIntegrationRepository extends JpaRepository<Marketpl
     Optional<MarketplaceIntegration> findBySystemClientIdAndMarketplaceAndActiveTrue(
             Long systemClientId,
             Marketplace marketplace
+    );
+
+    @Query(
+            value = """
+                    SELECT *
+                    FROM marketplace_integrations
+                    WHERE resource ->> 'user_id' = :userId
+                      AND marketplace = :marketplace
+                      AND active = TRUE
+                    LIMIT 1
+                    """,
+            nativeQuery = true
+    )
+    Optional<MarketplaceIntegration> findByMarketplaceUserIdAndMarketplaceAndActiveTrue(
+            @Param("userId") String userId,
+            @Param("marketplace") String marketplace
     );
 }

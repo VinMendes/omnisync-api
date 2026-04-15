@@ -487,6 +487,27 @@ Quando o tópico nao é suportado:
 
 ## Observações técnicas importantes
 
+- Usuário de testes:
+```
+Vendedor
+{
+    "id": 3328019238,
+    "email": "test_user_3706049556946734631@testuser.com",
+    "nickname": "TESTUSER3706049556946734631",
+    "site_status": "active",
+    "password": "IHU9rW8afD"
+}
+
+Comprador
+{
+    "id": 3328019240,
+    "email": "test_user_5126625446249747716@testuser.com",
+    "nickname": "TESTUSER5126625446249747716",
+    "site_status": "active",
+    "password": "uqOtKkre3q"
+}
+```
+
 - o backend atual possui métodos internos para listagem e consulta de anúncios em `MercadoLivreListingService`, mas esses métodos nao estão expostos em controller HTTP
 - o alias `POST /notifications` executa exatamente o mesmo fluxo do webhook principal
 - o callback OAuth público persiste integração apenas com base no `state`; o endpoint `/exchange` é o único que cruza explicitamente o `state` com o usuário autenticado

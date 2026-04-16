@@ -37,4 +37,21 @@ public interface MarketplaceIntegrationRepository extends JpaRepository<Marketpl
             @Param("userId") String userId,
             @Param("marketplace") String marketplace
     );
+
+    @Query(
+            value = """
+                    SELECT *
+                    FROM marketplace_integrations
+                    WHERE system_client_id = :systemClientId
+                      AND marketplace = :marketplace
+                      AND resource ->> 'user_id' IS NOT NULL
+                      AND active = TRUE
+                    LIMIT 1
+                    """,
+            nativeQuery = true
+    )
+    Optional<MarketplaceIntegration> findMercadoLivreActiveIntegrationForSync(
+            @Param("systemClientId") Long systemClientId,
+            @Param("marketplace") String marketplace
+    );
 }

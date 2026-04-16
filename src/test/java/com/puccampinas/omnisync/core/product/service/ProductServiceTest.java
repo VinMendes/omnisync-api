@@ -3,6 +3,11 @@ package com.puccampinas.omnisync.core.product.service;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.service.UserService;
+import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
+import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
+import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
 import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +43,8 @@ class ProductServiceTest {
     private ProductRepository productRepository;
     private ProductLogService productLogService;
     private MercadoLivreListingService mercadoLivreListingService;
+    private MarketplaceIntegrationRepository marketplaceIntegrationRepository;
+    private UserService userService;
     private ProductService productService;
 
     @BeforeEach
@@ -45,8 +52,16 @@ class ProductServiceTest {
         productRepository = mock(ProductRepository.class);
         productLogService = mock(ProductLogService.class);
         mercadoLivreListingService = mock(MercadoLivreListingService.class);
-        productService = new ProductService(productRepository, productLogService, mercadoLivreListingService);
-        reset(productRepository, productLogService, mercadoLivreListingService);
+        marketplaceIntegrationRepository = mock(MarketplaceIntegrationRepository.class);
+        userService = mock(UserService.class);
+        productService = new ProductService(
+                productRepository,
+                productLogService,
+                mercadoLivreListingService,
+                marketplaceIntegrationRepository,
+                userService
+        );
+        reset(productRepository, productLogService, mercadoLivreListingService, marketplaceIntegrationRepository, userService);
     }
 
     @Test
@@ -274,6 +289,76 @@ class ProductServiceTest {
     }
 
     @Test
+    void syncMercadoLivreProductsBySellerUserIdShouldCreateReactivateAndDeactivateOnlyMercadoLivreProducts() {
+        MarketplaceIntegration integration = new MarketplaceIntegration();
+        integration.setSystemClientId(1L);
+        integration.setResource(Map.of("user_id", "123456"));
+        User authenticatedUser = new User();
+        authenticatedUser.setSystemClientId(1L);
+
+        Product inactiveProduct = buildProduct(10L, 1L);
+        inactiveProduct.setActive(false);
+        inactiveProduct.setSku("SKU-ML-1");
+        inactiveProduct.setResource(Map.of(
+                "mercado_livre", Map.of("item_id", "MLB1")
+        ));
+
+        Product staleMercadoLivreProduct = buildProduct(20L, 1L);
+        staleMercadoLivreProduct.setActive(true);
+        staleMercadoLivreProduct.setSku("SKU-OLD");
+        staleMercadoLivreProduct.setResource(Map.of(
+                "mercado_livre", Map.of("item_id", "MLB-OLD")
+        ));
+
+        Product nonMercadoLivreProduct = buildProduct(30L, 1L);
+        nonMercadoLivreProduct.setActive(true);
+        nonMercadoLivreProduct.setResource(Map.of(
+                "shopee", Map.of("item_id", "SHP1")
+        ));
+
+        when(userService.findActiveEntityByEmail("user@test.com"))
+                .thenReturn(authenticatedUser);
+        when(marketplaceIntegrationRepository.findMercadoLivreActiveIntegrationForSync(1L, "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(mercadoLivreListingService.listAllClientListings(1L)).thenReturn(Map.of(
+                "items", List.of(
+                        Map.of("body", mercadolivreItem("MLB1", "SKU-ML-1", "Produto 1")),
+                        Map.of("body", mercadolivreItem("MLB2", "SKU-ML-2", "Produto 2"))
+                )
+        ));
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemId(1L, "MLB1"))
+                .thenReturn(Optional.of(inactiveProduct));
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemId(1L, "MLB2"))
+                .thenReturn(Optional.empty());
+        when(productRepository.findBySkuAndSystemClientId("SKU-ML-2", 1L))
+                .thenReturn(Optional.empty());
+        when(productRepository.findAllMercadoLivreProductsBySystemClientId(1L))
+                .thenReturn(List.of(inactiveProduct, staleMercadoLivreProduct));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            if (product.getId() == null) {
+                product.setId(99L);
+            }
+            return product;
+        });
+
+        MercadoLivreSyncResponse response = productService.syncMercadoLivreProducts("user@test.com", 1L);
+
+        assertEquals(2, response.getTotalListings());
+        assertEquals(2, response.getSyncedProducts());
+        assertEquals(1, response.getCreated());
+        assertEquals(0, response.getUpdated());
+        assertEquals(1, response.getReactivated());
+        assertEquals(1, response.getDeactivated());
+        assertTrue(inactiveProduct.getActive());
+        assertFalse(staleMercadoLivreProduct.getActive());
+        assertTrue(nonMercadoLivreProduct.getActive());
+        verify(productLogService).logCreate(any(Product.class));
+        verify(productLogService).logEdit(any(Product.class), any(Product.class));
+        verify(productLogService).logDelete(any(Product.class), any(Product.class));
+    }
+
+    @Test
     void updateShouldThrowWhenSystemClientIdAndIdAreNull() {
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
@@ -468,6 +553,22 @@ class ProductServiceTest {
                         "attributes", List.of(Map.of("id", "BRAND", "value_name", "Test Brand"))
                 )
         );
+    }
+
+    private Map<String, Object> mercadolivreItem(String itemId, String sku, String title) {
+        Map<String, Object> item = new java.util.LinkedHashMap<>();
+        item.put("id", itemId);
+        item.put("title", title);
+        item.put("seller_custom_field", sku);
+        item.put("available_quantity", 7);
+        item.put("price", new BigDecimal("149.90"));
+        item.put("status", "active");
+        item.put("seller_id", 123456);
+        item.put("category_id", "MLB1055");
+        item.put("listing_type_id", "free");
+        item.put("permalink", "https://mercadolivre.com.br/" + itemId);
+        item.put("last_updated", "2026-04-16T12:00:00.000Z");
+        return item;
     }
 
     @FunctionalInterface

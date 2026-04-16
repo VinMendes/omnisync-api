@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.List;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
@@ -16,6 +17,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Page<Product> findAllBySystemClientIdAndActiveTrue(Long systemClientId, Pageable pageable);
 
     Optional<Product> findBySkuAndSystemClientIdAndActiveTrue(String sku, Long systemClientId);
+
+    Optional<Product> findBySkuAndSystemClientId(String sku, Long systemClientId);
 
     Optional<Product> findByIdAndSystemClientIdAndActiveTrue(Long id, Long systemClientId);
 
@@ -34,4 +37,30 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("systemClientId") Long systemClientId,
             @Param("itemId") String itemId
     );
+
+    @Query(
+            value = """
+                    SELECT *
+                    FROM products
+                    WHERE system_client_id = :systemClientId
+                      AND resource -> 'mercado_livre' ->> 'item_id' = :itemId
+                    LIMIT 1
+                    """,
+            nativeQuery = true
+    )
+    Optional<Product> findBySystemClientIdAndMercadoLivreItemId(
+            @Param("systemClientId") Long systemClientId,
+            @Param("itemId") String itemId
+    );
+
+    @Query(
+            value = """
+                    SELECT *
+                    FROM products
+                    WHERE system_client_id = :systemClientId
+                      AND resource ? 'mercado_livre'
+                    """,
+            nativeQuery = true
+    )
+    List<Product> findAllMercadoLivreProductsBySystemClientId(@Param("systemClientId") Long systemClientId);
 }

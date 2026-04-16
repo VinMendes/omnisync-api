@@ -1,9 +1,13 @@
 package com.puccampinas.omnisync.integration.controller;
 
+import com.puccampinas.omnisync.core.product.service.ProductService;
+import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
 import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,9 +19,14 @@ import java.util.Map;
 public class MercadoLivreCatalogController {
 
     private final MercadoLivreListingService mercadoLivreListingService;
+    private final ProductService productService;
 
-    public MercadoLivreCatalogController(MercadoLivreListingService mercadoLivreListingService) {
+    public MercadoLivreCatalogController(
+            MercadoLivreListingService mercadoLivreListingService,
+            ProductService productService
+    ) {
         this.mercadoLivreListingService = mercadoLivreListingService;
+        this.productService = productService;
     }
 
     @GetMapping("/categories")
@@ -58,6 +67,16 @@ public class MercadoLivreCatalogController {
     ) {
         return ResponseEntity.ok(
                 mercadoLivreListingService.getCategoryRequirements(systemClientId, categoryId)
+        );
+    }
+
+    @PostMapping("/{systemClientId}/sync")
+    public ResponseEntity<MercadoLivreSyncResponse> syncSellerListings(
+            Authentication authentication,
+            @PathVariable Long systemClientId
+    ) {
+        return ResponseEntity.ok(
+                productService.syncMercadoLivreProducts(authentication.getName(), systemClientId)
         );
     }
 }

@@ -42,26 +42,15 @@ class MercadoLivreCatalogControllerTest {
     @Test
     void syncSellerListingsShouldReturnSyncSummary() throws Exception {
         MercadoLivreSyncResponse response = new MercadoLivreSyncResponse();
-        response.setSellerUserId("123456");
-        response.setSystemClientId(1L);
-        response.setTotalListings(2);
+        response.setMessage("Anúncios do Mercado Livre sincronizados com sucesso.");
         response.setSyncedProducts(2);
-        response.setCreated(1);
-        response.setUpdated(0);
-        response.setReactivated(1);
-        response.setDeactivated(1);
 
         when(productService.syncMercadoLivreProducts("user@test.com", 1L)).thenReturn(response);
 
         mockMvc.perform(post("/api/integrations/mercadolivre/catalog/1/sync")
                         .principal(new UsernamePasswordAuthenticationToken("user@test.com", null, List.of())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.seller_user_id").value("123456"))
-                .andExpect(jsonPath("$.system_client_id").value(1L))
-                .andExpect(jsonPath("$.total_listings").value(2))
-                .andExpect(jsonPath("$.synced_products").value(2))
-                .andExpect(jsonPath("$.created").value(1))
-                .andExpect(jsonPath("$.reactivated").value(1))
-                .andExpect(jsonPath("$.deactivated").value(1));
+                .andExpect(jsonPath("$.message").value("Anúncios do Mercado Livre sincronizados com sucesso."))
+                .andExpect(jsonPath("$.syncedProducts").value(2));
     }
 }

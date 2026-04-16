@@ -144,7 +144,7 @@ public class ProductService {
                         "Active Mercado Livre integration not found for systemClientId=" + systemClientId
                 ));
 
-        String sellerUserId = extractMarketplaceSellerUserId(integration);
+        extractMarketplaceSellerUserId(integration);
         Map<String, Object> listings = mercadoLivreListingService.listAllClientListings(systemClientId);
         List<Map<String, Object>> items = extractMercadoLivreItems(listings.get("items"));
         Set<String> syncedItemIds = new LinkedHashSet<>();
@@ -173,14 +173,8 @@ public class ProductService {
         int deactivated = deactivateMissingMercadoLivreProducts(systemClientId, syncedItemIds);
 
         MercadoLivreSyncResponse response = new MercadoLivreSyncResponse();
-        response.setSellerUserId(sellerUserId);
-        response.setSystemClientId(systemClientId);
-        response.setTotalListings(items.size());
+        response.setMessage("Anúncios do Mercado Livre sincronizados com sucesso.");
         response.setSyncedProducts(items.size());
-        response.setCreated(created);
-        response.setUpdated(updated);
-        response.setReactivated(reactivated);
-        response.setDeactivated(deactivated);
         return response;
     }
 

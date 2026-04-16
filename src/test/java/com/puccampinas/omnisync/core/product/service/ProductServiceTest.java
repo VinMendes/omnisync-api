@@ -344,12 +344,8 @@ class ProductServiceTest {
 
         MercadoLivreSyncResponse response = productService.syncMercadoLivreProducts("user@test.com", 1L);
 
-        assertEquals(2, response.getTotalListings());
+        assertEquals("Anúncios do Mercado Livre sincronizados com sucesso.", response.getMessage());
         assertEquals(2, response.getSyncedProducts());
-        assertEquals(1, response.getCreated());
-        assertEquals(0, response.getUpdated());
-        assertEquals(1, response.getReactivated());
-        assertEquals(1, response.getDeactivated());
         assertTrue(inactiveProduct.getActive());
         assertFalse(staleMercadoLivreProduct.getActive());
         assertTrue(nonMercadoLivreProduct.getActive());

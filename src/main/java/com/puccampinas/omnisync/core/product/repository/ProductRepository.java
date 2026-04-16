@@ -58,7 +58,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     SELECT *
                     FROM products
                     WHERE system_client_id = :systemClientId
-                      AND resource ? 'mercado_livre'
+                      AND jsonb_extract_path(resource, 'mercado_livre') IS NOT NULL
                     """,
             nativeQuery = true
     )

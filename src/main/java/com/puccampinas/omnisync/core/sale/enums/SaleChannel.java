@@ -4,5 +4,6 @@ public enum SaleChannel {
     MERCADO_LIVRE,
     SHOPEE,
     AMAZON,
-    PHYSICAL
+    PHYSICAL,
+    MANUAL
 }

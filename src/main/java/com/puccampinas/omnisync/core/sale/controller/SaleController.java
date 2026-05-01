@@ -1,14 +1,11 @@
 package com.puccampinas.omnisync.core.sale.controller;
 
+import com.puccampinas.omnisync.core.sale.dto.SaleCreateRequest;
 import com.puccampinas.omnisync.core.sale.dto.SaleDto;
 import com.puccampinas.omnisync.core.sale.service.SaleService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/sales/{systemClientId}")
@@ -18,6 +15,15 @@ public class SaleController {
 
     public SaleController(SaleService saleService) {
         this.saleService = saleService;
+    }
+
+    @PostMapping
+    public ResponseEntity<SaleDto> create (
+            @PathVariable Long systemClientId,
+            @RequestBody SaleCreateRequest saleCreateRequest
+            )
+    {
+        return ResponseEntity.ok(this.saleService.create(systemClientId, saleCreateRequest));
     }
 
     @GetMapping

@@ -1,13 +1,21 @@
 package com.puccampinas.omnisync.core.sale.service;
 
 import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
+import com.puccampinas.omnisync.core.product.entity.Product;
+import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.core.sale.dto.SaleCreateRequest;
 import com.puccampinas.omnisync.core.sale.dto.SaleDto;
 import com.puccampinas.omnisync.core.sale.dto.SaleLogDto;
 import com.puccampinas.omnisync.core.sale.entity.Sale;
 import com.puccampinas.omnisync.core.sale.entity.SaleLog;
+import com.puccampinas.omnisync.core.sale.enums.SaleChannel;
+import com.puccampinas.omnisync.core.sale.enums.SaleStatus;
 import com.puccampinas.omnisync.core.sale.repository.SaleLogRepository;
 import com.puccampinas.omnisync.core.sale.repository.SaleRepository;
+import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
+import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.transaction.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
@@ -16,11 +24,85 @@ public class SaleService {
 
     private final SaleRepository saleRepository;
     private final SaleLogRepository saleLogRepository;
+    private final ProductRepository productRepository;
+    private final SaleLogService saleLogService;
+    private final MercadoLivreListingService mercadoLivreListingService;
 
-    public SaleService(SaleRepository saleRepository, SaleLogRepository saleLogRepository) {
+    public SaleService(SaleRepository saleRepository, SaleLogRepository saleLogRepository, ProductRepository productRepository, SaleLogService saleLogService, MercadoLivreListingService mercadoLivreListingService) {
         this.saleRepository = saleRepository;
         this.saleLogRepository = saleLogRepository;
+        this.productRepository = productRepository;
+        this.saleLogService = saleLogService;
+        this.mercadoLivreListingService = mercadoLivreListingService;
     }
+
+    @Transactional
+    public SaleDto create(Long systemClientId, SaleCreateRequest request) {
+
+        // Validações iniciais
+        if (systemClientId == null || request == null || request.getProductId() == null) {
+            throw new IllegalArgumentException("Dados do client, request e produto sao obrigatorios");
+        }
+
+        Product product = productRepository.findByIdAndSystemClientIdAndActiveTrue(
+                        request.getProductId(), systemClientId)
+                .orElseThrow( () -> new EntityNotFoundException("Produto nao encontrado, inativo, ou nao pertence a este cliente"));
+
+        int availableStock = product.getStock() - product.getReservedStock();
+
+        if (request.getQuantity() > availableStock) {
+            throw new IllegalArgumentException("Estoque insuficiente. Disponivel: " + availableStock);
+        }
+
+        // Subtrair do estoque físico a quantidade vendida
+        product.setStock(product.getStock() - request.getQuantity());
+        Product savedProduct = productRepository.save(product);
+
+        // Define o canal da venda com segurança
+        String channel = request.getChannel() != null ? request.getChannel().name() : SaleChannel.MANUAL.name();
+
+// 🌟 A MÁGICA OMNICHANNEL ACONTECE AQUI 🌟
+        // Se a venda não veio do ML, nós avisamos o ML que o estoque local caiu!
+        if (!SaleChannel.MERCADO_LIVRE.name().equals(channel)) {
+            String mlItemId = getMercadoLivreItemId(savedProduct);
+
+            // Se encontrou o ID do anúncio, manda a requisição pra nuvem
+            if (mlItemId != null) {
+                try {
+                    mercadoLivreListingService.updateListing(
+                            systemClientId,
+                            savedProduct.getId(),
+                            mlItemId,
+                            savedProduct
+                    );
+                } catch (Exception ex) {
+                    // BLINDAGEM DE ARQUITETURA:
+                    // Se o ML cair, demorar ou recusar a atualização (ex: anúncio free),
+                    // o erro morre aqui e a venda da loja física finaliza com sucesso!
+                    System.out.println("Aviso: Não foi possível sincronizar o estoque no Mercado Livre para o item "
+                            + mlItemId + ". Motivo: " + ex.getMessage());
+                }
+            }
+        }
+
+        // Finalmente, montar e salvar a venda
+        Sale sale = new Sale();
+        sale.setSystemClientId(systemClientId);
+        sale.setProductId(savedProduct.getId());
+        sale.setQuantity(request.getQuantity());
+        sale.setTotalValue(request.getTotalValue());
+        sale.setChannel(channel);
+        sale.setStatus(SaleStatus.CONFIRMED.name());
+        sale.setResource(request.getResource());
+
+        Sale savedSale = saleRepository.save(sale);
+
+        // saleLogService.logCreate(savedSale);
+
+        return toDto(savedSale, false);
+    }
+
+
 
     public Page<SaleDto> getAll(Long systemClientId, long offset, int limit) {
         validateSystemClientId(systemClientId);
@@ -108,5 +190,20 @@ public class SaleService {
         if (id == null) {
             throw new IllegalArgumentException("Id is required.");
         }
+    }
+
+    private String getMercadoLivreItemId(Product product) {
+        if (product.getResource() == null) {
+            return null;
+        }
+
+        Object mercadoLivre = product.getResource().get("mercado_livre");
+        if (mercadoLivre instanceof java.util.Map<?, ?> mlMap) {
+            Object itemId = mlMap.get("item_id");
+            if (itemId != null && !String.valueOf(itemId).isBlank()) {
+                return String.valueOf(itemId);
+            }
+        }
+        return null;
     }
 }

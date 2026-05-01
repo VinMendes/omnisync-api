@@ -26,7 +26,7 @@ public class MercadoLivreListingService {
     private static final String TEST_SITE_ID = "MLB";
     private static final String TEST_CURRENCY_ID = "BRL";
     private static final String TEST_BUYING_MODE = "buy_it_now";
-    private static final String TEST_LISTING_TYPE_ID = "free";
+    private static final String DEFAULT_LISTING_TYPE_ID = "gold_special";
     private static final String TEST_TITLE = "Item de Teste - Por Favor Nao Ofertar";
 
     private final MercadoLivreClient mercadoLivreClient;
@@ -279,7 +279,7 @@ public class MercadoLivreListingService {
         payload.put("currency_id", TEST_CURRENCY_ID);
         payload.put("available_quantity", calculateAvailableQuantity(product));
         payload.put("buying_mode", TEST_BUYING_MODE);
-        payload.put("listing_type_id", TEST_LISTING_TYPE_ID);
+        payload.put("listing_type_id", getOptionalMetadataString(metadata, "listing_type_id", DEFAULT_LISTING_TYPE_ID));
         payload.put("condition", condition);
         payload.put("pictures", pictures);
         payload.put("attributes", attributes);
@@ -694,9 +694,9 @@ public class MercadoLivreListingService {
             return null;
         }
 
-        if ("gold".equalsIgnoreCase(listingType) || "gold_special".equalsIgnoreCase(listingType)) {
+        if ("gold".equalsIgnoreCase(listingType)) {
             throw new IllegalArgumentException(
-                    "Mercado Livre listing_type_id cannot be gold or gold_special in test flows."
+                    "Mercado Livre listing_type_id cannot be gold."
             );
         }
 

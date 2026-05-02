@@ -61,7 +61,6 @@ public class SaleService {
         // Define o canal da venda com segurança
         String channel = request.getChannel() != null ? request.getChannel().name() : SaleChannel.MANUAL.name();
 
-// 🌟 A MÁGICA OMNICHANNEL ACONTECE AQUI 🌟
         // Se a venda não veio do ML, nós avisamos o ML que o estoque local caiu!
         if (!SaleChannel.MERCADO_LIVRE.name().equals(channel)) {
             String mlItemId = getMercadoLivreItemId(savedProduct);

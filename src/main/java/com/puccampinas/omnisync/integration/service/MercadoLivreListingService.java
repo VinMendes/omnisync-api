@@ -273,7 +273,7 @@ public class MercadoLivreListingService {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("site_id", TEST_SITE_ID);
-        payload.put("title", TEST_TITLE);
+        payload.put("title", product.getName());
         payload.put("category_id", categoryId);
         payload.put("price", product.getPrice());
         payload.put("currency_id", TEST_CURRENCY_ID);
@@ -290,14 +290,19 @@ public class MercadoLivreListingService {
 
     private Map<String, Object> buildUpdatePayload(Product product, String accessToken) {
         Map<String, Object> metadata = extractMercadoLivreMetadata(product, true);
+        int availableQuantity = calculateAvailableQuantity(product);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("title", product.getName());
         payload.put("price", product.getPrice());
-        payload.put("available_quantity", calculateAvailableQuantity(product));
+        payload.put("available_quantity", availableQuantity);
 
-        putIfPresent(payload, "status", metadata.get("status"));
-        putIfPresent(payload, "listing_type_id", normalizeExplicitListingType(metadata.get("listing_type_id")));
+        if (availableQuantity == 0) {
+            payload.put("status", "paused");
+        } else {
+            putIfPresent(payload, "status", metadata.get("status"));
+        }
+
         putIfPresent(payload, "condition", metadata.get("condition"));
         putIfPresent(payload, "buying_mode", metadata.get("buying_mode"));
         putIfPresent(payload, "video_id", metadata.get("video_id"));

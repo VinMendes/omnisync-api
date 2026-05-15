@@ -12,7 +12,7 @@ import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenReposi
 import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import io.jsonwebtoken.Claims;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 

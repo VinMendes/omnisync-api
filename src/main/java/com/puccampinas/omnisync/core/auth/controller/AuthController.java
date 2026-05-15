@@ -36,6 +36,42 @@ import org.springframework.web.bind.annotation.*;
  *     <li>Solicitar recuperação de senha</li>
  *     <li>Redefinir senha usando token de recuperação</li>
  * </ul>
+ *
+ * <h2>Modelo de autenticação utilizado</h2>
+ * <p>
+ * A aplicação utiliza autenticação baseada em <strong>JWT + cookies HttpOnly</strong>,
+ * com dois tokens:
+ * </p>
+ * <ul>
+ *     <li><strong>Access Token</strong>: curta duração, usado nas rotas protegidas</li>
+ *     <li><strong>Refresh Token</strong>: longa duração, usado para gerar um novo access token</li>
+ * </ul>
+ *
+ * <p>
+ * Além dos cookies, o sistema também retorna os tokens no corpo da resposta
+ * de login/registro. Isso permite que outros clientes, como Postman ou
+ * frontends que prefiram usar Bearer Token, aproveitem os mesmos tokens.
+ * </p>
+ *
+ * <p>
+ * No caso do refresh, o endpoint também aceita o refresh token:
+ * </p>
+ * <ul>
+ *     <li>via header {@code Authorization: Bearer ...}</li>
+ *     <li>ou via cookie</li>
+ * </ul>
+ *
+ * <p>
+ * A recuperação de senha utiliza um token aleatório salvo no banco,
+ * separado dos JWTs de autenticação. Esse token tem expiração e só pode ser
+ * usado uma vez.
+ * </p>
+ *
+ * <p>
+ * Os cookies são gerenciados pelo {@link AuthCookieService}, enquanto
+ * a regra de criação, autenticação, renovação e recuperação de senha
+ * fica concentrada no {@link AuthService}.
+ * </p>
  */
 @RestController
 @RequestMapping("/api/auth")

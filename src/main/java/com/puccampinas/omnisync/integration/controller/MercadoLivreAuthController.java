@@ -1,7 +1,9 @@
 package com.puccampinas.omnisync.integration.controller;
 
+import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreCodeExchangeRequest;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationResponse;
+import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationStatusResponse;
 import com.puccampinas.omnisync.integration.service.MercadoLivreAuthService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -21,9 +23,20 @@ import java.util.Map;
 public class MercadoLivreAuthController {
 
     private final MercadoLivreAuthService service;
+    private final UserService userService;
 
-    public MercadoLivreAuthController(MercadoLivreAuthService service) {
+    public MercadoLivreAuthController(MercadoLivreAuthService service, UserService userService) {
         this.service = service;
+        this.userService = userService;
+    }
+
+    @GetMapping("/status")
+    public ResponseEntity<MercadoLivreIntegrationStatusResponse> getStatus(Authentication authentication) {
+        if (authentication == null || authentication.getName() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        Long systemClientId = userService.findActiveEntityByEmail(authentication.getName()).getSystemClientId();
+        return ResponseEntity.ok(service.getStatus(systemClientId));
     }
 
     @GetMapping("/connect-url")

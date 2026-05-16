@@ -6,6 +6,7 @@ import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.client.MercadoLivreClient;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationResponse;
+import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationStatusResponse;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreTokenResponse;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
@@ -125,6 +126,19 @@ public class MercadoLivreAuthService {
                 integration.getResource(),
                 encryptor.decrypt(integration.getAccessToken())
         );
+    }
+
+    public MercadoLivreIntegrationStatusResponse getStatus(Long systemClientId) {
+        return repository
+                .findBySystemClientIdAndMarketplace(systemClientId, Marketplace.MERCADO_LIVRE)
+                .map(integration -> new MercadoLivreIntegrationStatusResponse(
+                        true,
+                        integration.getSystemClientId(),
+                        integration.getActive(),
+                        integration.getExpiresAt(),
+                        integration.getMarketplace().name()
+                ))
+                .orElseGet(() -> MercadoLivreIntegrationStatusResponse.notConnected(systemClientId));
     }
 
     private void validateSystemClient(Long systemClientId) {

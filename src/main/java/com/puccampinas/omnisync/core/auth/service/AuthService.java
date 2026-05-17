@@ -207,9 +207,13 @@ public class AuthService {
         passwordResetTokenRepository.save(resetToken);
 
         /*
-         * Depois, quando tiver frontend em produção, trocar localhost pela URL real.
+
+         * Monta o link apontando para a tela de redefinição de senha do frontend.
+
+         * A URL base vem do application.properties.
+
          */
-        String resetLink = "http://localhost:5173/reset-password?token=" + token;
+        String resetLink = resetPasswordUrl + "?token=" + token;
 
         passwordResetEmailService.sendPasswordResetEmail(user.getEmail(), resetLink);
     }

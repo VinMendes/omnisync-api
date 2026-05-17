@@ -2,9 +2,11 @@ package com.puccampinas.omnisync.core.auth.controller;
 
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.dto.AuthResponse;
+import com.puccampinas.omnisync.core.auth.dto.ForgotPasswordRequest;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
 import com.puccampinas.omnisync.core.auth.dto.RefreshResponse;
 import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
+import com.puccampinas.omnisync.core.auth.dto.ResetPasswordRequest;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
 import com.puccampinas.omnisync.core.users.entity.User;
 import jakarta.servlet.http.Cookie;
@@ -31,6 +33,8 @@ import org.springframework.web.bind.annotation.*;
  *     <li>Retornar tokens também no corpo da resposta</li>
  *     <li>Renovar o access token a partir do refresh token</li>
  *     <li>Realizar logout limpando os cookies</li>
+ *     <li>Solicitar recuperação de senha</li>
+ *     <li>Redefinir senha usando token de recuperação</li>
  * </ul>
  *
  * <h2>Modelo de autenticação utilizado</h2>
@@ -58,9 +62,15 @@ import org.springframework.web.bind.annotation.*;
  * </ul>
  *
  * <p>
+ * A recuperação de senha utiliza um token aleatório salvo no banco,
+ * separado dos JWTs de autenticação. Esse token tem expiração e só pode ser
+ * usado uma vez.
+ * </p>
+ *
+ * <p>
  * Os cookies são gerenciados pelo {@link AuthCookieService}, enquanto
- * a regra de criação, autenticação e renovação dos tokens fica concentrada
- * no {@link AuthService}.
+ * a regra de criação, autenticação, renovação e recuperação de senha
+ * fica concentrada no {@link AuthService}.
  * </p>
  */
 @RestController
@@ -69,10 +79,6 @@ public class AuthController {
 
     /**
      * Serviço responsável pela regra de negócio da autenticação.
-     *
-     * <p>
-     * Ele realiza cadastro, login, geração de tokens e renovação do access token.
-     * </p>
      */
     private final AuthService authService;
 
@@ -95,22 +101,6 @@ public class AuthController {
 
     /**
      * Registra um novo usuário no sistema.
-     *
-     * <p>
-     * Fluxo:
-     * </p>
-     * <ol>
-     *     <li>Recebe os dados do usuário via {@link RegisterRequest}</li>
-     *     <li>Chama o service para cadastrar o usuário no banco</li>
-     *     <li>Gera access token e refresh token</li>
-     *     <li>Envia os tokens em cookies HttpOnly</li>
-     *     <li>Retorna um {@link AuthResponse} com os dados do usuário e os tokens</li>
-     * </ol>
-     *
-     * <p>
-     * Dessa forma, o navegador continua usando cookies normalmente,
-     * mas outros clientes também podem usar os tokens retornados no body.
-     * </p>
      *
      * @param req dados enviados para registro
      * @param response resposta HTTP usada para adicionar os cookies
@@ -143,22 +133,6 @@ public class AuthController {
     /**
      * Autentica um usuário já cadastrado.
      *
-     * <p>
-     * Fluxo:
-     * </p>
-     * <ol>
-     *     <li>Recebe email e senha via {@link LoginRequest}</li>
-     *     <li>Valida as credenciais no {@link AuthService}</li>
-     *     <li>Gera access token e refresh token</li>
-     *     <li>Adiciona ambos nos cookies da resposta</li>
-     *     <li>Retorna um {@link AuthResponse} com informações do usuário e os tokens</li>
-     * </ol>
-     *
-     * <p>
-     * Assim, o cliente pode continuar usando o fluxo por cookie
-     * ou optar por guardar o token retornado no body e enviar via Bearer.
-     * </p>
-     *
      * @param req credenciais do usuário
      * @param response resposta HTTP usada para adicionar os cookies
      * @return 200 OK em caso de sucesso, ou 401 em caso de credenciais inválidas
@@ -188,37 +162,54 @@ public class AuthController {
     }
 
     /**
+     * Solicita recuperação de senha.
+     *
+     * <p>
+     * Essa rota recebe o e-mail do usuário e, se ele existir no sistema,
+     * gera um token de recuperação de senha.
+     * </p>
+     *
+     * <p>
+     * Por segurança, a resposta é sempre genérica. Assim, a API não revela
+     * se determinado e-mail está cadastrado ou não.
+     * </p>
+     *
+     * @param req requisição contendo o e-mail do usuário
+     * @return 200 OK com mensagem genérica
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest req) {
+        authService.forgotPassword(req);
+
+        return ResponseEntity.ok(
+                "Se o e-mail existir, enviaremos instruções para recuperação de senha"
+        );
+    }
+
+    /**
+     * Redefine a senha do usuário usando um token de recuperação válido.
+     *
+     * <p>
+     * Essa rota recebe o token gerado no fluxo de esqueci senha e a nova senha.
+     * Se o token existir, não estiver expirado e ainda não tiver sido usado,
+     * a senha do usuário será atualizada.
+     * </p>
+     *
+     * @param req requisição contendo token e nova senha
+     * @return 200 OK se a senha foi alterada, ou 400 em caso de token inválido
+     */
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
+        try {
+            authService.resetPassword(req);
+            return ResponseEntity.ok("Senha alterada com sucesso");
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /**
      * Renova o access token usando um refresh token válido.
-     *
-     * <p>
-     * O refresh token pode ser recebido de duas formas:
-     * </p>
-     * <ol>
-     *     <li>via header {@code Authorization: Bearer ...}</li>
-     *     <li>via cookie de refresh</li>
-     * </ol>
-     *
-     * <p>
-     * A prioridade é sempre do Bearer Token.
-     * Ou seja:
-     * </p>
-     * <ul>
-     *     <li>se vier Bearer, ele será usado</li>
-     *     <li>se não vier Bearer, o controller tentará usar o cookie</li>
-     * </ul>
-     *
-     * <p>
-     * Em caso de sucesso:
-     * </p>
-     * <ul>
-     *     <li>o cookie do access token é atualizado</li>
-     *     <li>o novo access token também é devolvido no body</li>
-     * </ul>
-     *
-     * <p>
-     * Caso o refresh token esteja ausente, inválido ou expirado,
-     * os cookies de autenticação são removidos.
-     * </p>
      *
      * @param request requisição HTTP atual, usada para ler header e cookies
      * @param response resposta HTTP usada para atualizar o cookie do access token
@@ -228,10 +219,6 @@ public class AuthController {
     public ResponseEntity<?> refresh(HttpServletRequest request,
                                      HttpServletResponse response) {
 
-        /*
-         * Primeiro tenta receber o refresh token via Bearer.
-         * Se não vier header Authorization, tenta o cookie de refresh.
-         */
         String refreshToken = extractBearerToken(request);
 
         if (refreshToken == null) {
@@ -266,12 +253,6 @@ public class AuthController {
     /**
      * Realiza logout removendo os cookies de autenticação do cliente.
      *
-     * <p>
-     * Como a aplicação utiliza JWT stateless, o logout consiste
-     * em limpar os cookies do navegador, impedindo o envio futuro
-     * dos tokens.
-     * </p>
-     *
      * @param response resposta HTTP usada para remover os cookies
      * @return 200 OK confirmando o logout
      */
@@ -283,14 +264,6 @@ public class AuthController {
 
     /**
      * Método utilitário para definir os cookies de autenticação.
-     *
-     * <p>
-     * Ele configura:
-     * </p>
-     * <ul>
-     *     <li>cookie do access token com curta duração</li>
-     *     <li>cookie do refresh token com longa duração</li>
-     * </ul>
      *
      * @param response resposta HTTP atual
      * @param access access token gerado
@@ -306,13 +279,6 @@ public class AuthController {
 
     /**
      * Extrai o token do header Authorization no formato Bearer.
-     *
-     * <p>
-     * Exemplo esperado:
-     * </p>
-     * <pre>
-     * Authorization: Bearer eyJhbGciOi...
-     * </pre>
      *
      * @param request requisição HTTP atual
      * @return token se existir e estiver no formato correto; caso contrário, {@code null}

@@ -1,14 +1,26 @@
 package com.puccampinas.omnisync.core.auth.service;
 
-import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.auth.dto.AuthResponse;
+import com.puccampinas.omnisync.core.auth.dto.ForgotPasswordRequest;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
 import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
+import com.puccampinas.omnisync.core.auth.dto.ResetPasswordRequest;
+import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetEmailService;
+import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetToken;
+import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import io.jsonwebtoken.Claims;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 
 /**
  * Serviço responsável pela regra de negócio da autenticação.
@@ -21,31 +33,9 @@ import org.springframework.stereotype.Service;
  *     <li>validação de login</li>
  *     <li>geração de access token e refresh token</li>
  *     <li>renovação do access token a partir do refresh token</li>
+ *     <li>recuperação e redefinição de senha</li>
  *     <li>montagem da resposta de autenticação</li>
  * </ul>
- *
- * <p>
- * O controller apenas recebe a requisição HTTP e delega a lógica para este serviço.
- * </p>
- *
- * <h2>Observação sobre o modelo híbrido adotado</h2>
- * <p>
- * A aplicação continua enviando os tokens em <strong>cookies HttpOnly</strong>,
- * mas agora também pode retornar os tokens no corpo da resposta.
- * </p>
- *
- * <p>
- * Isso permite que:
- * </p>
- * <ul>
- *     <li>o navegador continue funcionando naturalmente com cookies</li>
- *     <li>clientes como Postman ou frontend customizado utilizem Bearer Token</li>
- * </ul>
- *
- * <p>
- * Ou seja, mantemos a praticidade do cookie e ganhamos flexibilidade
- * para outros tipos de cliente.
- * </p>
  */
 @Service
 public class AuthService {
@@ -57,11 +47,6 @@ public class AuthService {
 
     /**
      * Componente de segurança usado para gerar e validar hash de senha.
-     *
-     * <p>
-     * No cadastro, ele transforma a senha em hash.
-     * No login, ele compara a senha digitada com o hash salvo no banco.
-     * </p>
      */
     private final PasswordEncoder passwordEncoder;
 
@@ -71,33 +56,47 @@ public class AuthService {
     private final JwtService jwtService;
 
     /**
+     * Repositório responsável pelos tokens de recuperação de senha.
+     */
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+
+    /**
+     * Serviço responsável pelo envio do link de recuperação de senha.
+     *
+     * <p>
+     * Por enquanto, ele apenas imprime o link no console.
+     * Futuramente pode ser substituído por envio real de e-mail.
+     * </p>
+     */
+    private final PasswordResetEmailService passwordResetEmailService;
+
+    private final String resetPasswordUrl;
+
+    /**
      * Construtor com injeção de dependências.
      *
      * @param userRepository repositório de usuários
      * @param passwordEncoder encoder de senha
      * @param jwtService serviço de JWT
+     * @param passwordResetTokenRepository repositório de tokens de recuperação
+     * @param passwordResetEmailService serviço de envio de recuperação de senha
      */
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtService jwtService) {
+                       JwtService jwtService,
+                       PasswordResetTokenRepository passwordResetTokenRepository,
+                       PasswordResetEmailService passwordResetEmailService,
+                       @Value("${app.frontend.reset-password-url}") String resetPasswordUrl) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.passwordResetEmailService = passwordResetEmailService;
+        this.resetPasswordUrl = resetPasswordUrl;
     }
 
     /**
      * Registra um novo usuário no sistema.
-     *
-     * <p>
-     * Fluxo:
-     * </p>
-     * <ol>
-     *     <li>Normaliza o email (trim + lowercase)</li>
-     *     <li>Verifica se já existe usuário com o mesmo email</li>
-     *     <li>Cria a entidade {@link User}</li>
-     *     <li>Aplica hash na senha com {@link PasswordEncoder}</li>
-     *     <li>Salva o usuário no banco</li>
-     * </ol>
      *
      * @param req dados enviados para cadastro
      * @return usuário salvo no banco
@@ -127,16 +126,6 @@ public class AuthService {
     /**
      * Autentica um usuário a partir de email e senha.
      *
-     * <p>
-     * Fluxo:
-     * </p>
-     * <ol>
-     *     <li>Normaliza o email</li>
-     *     <li>Busca o usuário no banco</li>
-     *     <li>Valida se o usuário está ativo</li>
-     *     <li>Compara a senha digitada com o hash salvo</li>
-     * </ol>
-     *
      * @param req credenciais informadas no login
      * @return usuário autenticado
      * @throws RuntimeException se o usuário não existir, estiver inativo ou a senha estiver incorreta
@@ -160,11 +149,124 @@ public class AuthService {
     }
 
     /**
-     * Gera um access token para o usuário informado.
+     * Inicia o fluxo de recuperação de senha.
      *
      * <p>
-     * O subject do token é o email do usuário.
+     * Fluxo:
      * </p>
+     * <ol>
+     *     <li>Normaliza o e-mail recebido</li>
+     *     <li>Busca o usuário pelo e-mail</li>
+     *     <li>Se o usuário não existir, encerra silenciosamente</li>
+     *     <li>Remove tokens antigos daquele usuário</li>
+     *     <li>Gera um novo token seguro</li>
+     *     <li>Salva o token com expiração de 30 minutos</li>
+     *     <li>Gera o link de recuperação</li>
+     *     <li>Envia ou imprime o link pelo {@link PasswordResetEmailService}</li>
+     * </ol>
+     *
+     * <p>
+     * A resposta do controller deve ser sempre genérica para não revelar
+     * se o e-mail existe ou não na base.
+     * </p>
+     *
+     * @param req objeto contendo o e-mail do usuário
+     */
+    @Transactional
+    public void forgotPassword(ForgotPasswordRequest req) {
+        String normalizedEmail = normalizeEmail(req.email());
+
+        User user = userRepository.findByEmail(normalizedEmail)
+                .orElse(null);
+
+        /*
+         * Não revelamos se o e-mail existe ou não.
+         * Isso evita enumeração de usuários.
+         */
+        if (user == null) {
+            return;
+        }
+
+        if (!Boolean.TRUE.equals(user.getActive())) {
+            return;
+        }
+
+        /*
+         * Remove tokens antigos desse usuário.
+         * Assim, apenas o último link gerado fica válido.
+         */
+        passwordResetTokenRepository.deleteByUser(user);
+
+        String token = generateSecureToken();
+
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUser(user);
+        resetToken.setToken(token);
+        resetToken.setExpiresAt(Instant.now().plus(30, ChronoUnit.MINUTES));
+
+        passwordResetTokenRepository.save(resetToken);
+
+        /*
+
+         * Monta o link apontando para a tela de redefinição de senha do frontend.
+
+         * A URL base vem do application.properties.
+
+         */
+        String resetLink = resetPasswordUrl + "?token=" + token;
+
+        passwordResetEmailService.sendPasswordResetEmail(user.getEmail(), resetLink);
+    }
+
+    /**
+     * Redefine a senha do usuário usando um token de recuperação válido.
+     *
+     * <p>
+     * Fluxo:
+     * </p>
+     * <ol>
+     *     <li>Busca o token recebido no banco</li>
+     *     <li>Valida se o token existe</li>
+     *     <li>Valida se o token ainda não foi usado</li>
+     *     <li>Valida se o token ainda não expirou</li>
+     *     <li>Busca o usuário associado ao token</li>
+     *     <li>Criptografa a nova senha</li>
+     *     <li>Atualiza a senha do usuário</li>
+     *     <li>Marca o token como utilizado</li>
+     * </ol>
+     *
+     * @param req objeto contendo token e nova senha
+     * @throws RuntimeException se o token for inválido, expirado ou já utilizado
+     */
+    @Transactional
+    public void resetPassword(ResetPasswordRequest req) {
+        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(req.token())
+                .orElseThrow(() -> new RuntimeException("Token inválido"));
+
+        if (resetToken.isUsed()) {
+            throw new RuntimeException("Token já utilizado");
+        }
+
+        if (resetToken.getExpiresAt().isBefore(Instant.now())) {
+            throw new RuntimeException("Token expirado");
+        }
+
+        User user = resetToken.getUser();
+
+        if (!Boolean.TRUE.equals(user.getActive())) {
+            throw new RuntimeException("Usuário inativo");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
+        userRepository.save(user);
+
+        resetToken.setUsed(true);
+        resetToken.setUsedAt(Instant.now());
+        passwordResetTokenRepository.save(resetToken);
+    }
+
+    /**
+     * Gera um access token para o usuário informado.
      *
      * @param user usuário autenticado
      * @return access token JWT
@@ -185,17 +287,6 @@ public class AuthService {
 
     /**
      * Gera um novo access token a partir de um refresh token válido.
-     *
-     * <p>
-     * Fluxo:
-     * </p>
-     * <ol>
-     *     <li>Valida o refresh token e garante que ele é do tipo refresh</li>
-     *     <li>Extrai o email do subject</li>
-     *     <li>Busca o usuário no banco</li>
-     *     <li>Verifica se o usuário ainda está ativo</li>
-     *     <li>Gera um novo access token</li>
-     * </ol>
      *
      * @param refreshToken token de refresh recebido do cliente
      * @return novo access token
@@ -219,19 +310,6 @@ public class AuthService {
      * Monta um DTO de resposta de autenticação com os dados básicos do usuário
      * e com os tokens recém-gerados.
      *
-     * <p>
-     * Essa resposta segue o modelo híbrido da aplicação:
-     * </p>
-     * <ul>
-     *     <li>os cookies continuam sendo enviados normalmente</li>
-     *     <li>os tokens também são devolvidos no body para clientes que preferirem usar Bearer</li>
-     * </ul>
-     *
-     * <p>
-     * Isso não substitui os cookies, apenas adiciona uma segunda forma
-     * de o cliente consumir a autenticação.
-     * </p>
-     *
      * @param message mensagem de retorno da operação
      * @param user usuário autenticado ou registrado
      * @param accessToken access token gerado
@@ -254,14 +332,26 @@ public class AuthService {
     }
 
     /**
-     * Normaliza o email para evitar diferenças de caixa ou espaços.
+     * Gera um token aleatório e seguro para recuperação de senha.
      *
      * <p>
-     * Exemplo:
+     * Este token não é JWT. Ele é apenas uma string aleatória, salva no banco,
+     * usada uma única vez e com tempo de expiração.
      * </p>
-     * <pre>
-     * "  VINI@EMAIL.COM  " -> "vini@email.com"
-     * </pre>
+     *
+     * @return token seguro em Base64 URL-safe
+     */
+    private String generateSecureToken() {
+        byte[] bytes = new byte[48];
+        new SecureRandom().nextBytes(bytes);
+
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(bytes);
+    }
+
+    /**
+     * Normaliza o email para evitar diferenças de caixa ou espaços.
      *
      * @param email email original
      * @return email normalizado

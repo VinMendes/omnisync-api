@@ -15,6 +15,7 @@ import io.jsonwebtoken.Claims;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -69,6 +70,8 @@ public class AuthService {
      */
     private final PasswordResetEmailService passwordResetEmailService;
 
+    private final String resetPasswordUrl;
+
     /**
      * Construtor com injeção de dependências.
      *
@@ -82,12 +85,14 @@ public class AuthService {
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
                        PasswordResetTokenRepository passwordResetTokenRepository,
-                       PasswordResetEmailService passwordResetEmailService) {
+                       PasswordResetEmailService passwordResetEmailService,
+                       @Value("${app.frontend.reset-password-url}") String resetPasswordUrl) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordResetEmailService = passwordResetEmailService;
+        this.resetPasswordUrl = resetPasswordUrl;
     }
 
     /**

@@ -89,7 +89,7 @@ public class SystemClientService {
         return this.repository.save(client);
     }
 
-    private SystemClient findActiveById(long id) {
+    public SystemClient findActiveById(long id) {
         return this.repository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new EntityNotFoundException("Active client not found for id=" + id));
     }

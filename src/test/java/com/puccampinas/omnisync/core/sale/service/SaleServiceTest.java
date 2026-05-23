@@ -3,8 +3,10 @@ package com.puccampinas.omnisync.core.sale.service;
 import com.puccampinas.omnisync.core.sale.dto.SaleDto;
 import com.puccampinas.omnisync.core.sale.entity.Sale;
 import com.puccampinas.omnisync.core.sale.entity.SaleLog;
+import com.puccampinas.omnisync.core.product.repository.ProductRepository;
 import com.puccampinas.omnisync.core.sale.repository.SaleLogRepository;
 import com.puccampinas.omnisync.core.sale.repository.SaleRepository;
+import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,13 +33,19 @@ class SaleServiceTest {
 
     private SaleRepository saleRepository;
     private SaleLogRepository saleLogRepository;
+    private ProductRepository productRepository;
+    private SaleLogService saleLogService;
+    private MercadoLivreListingService mercadoLivreListingService;
     private SaleService saleService;
 
     @BeforeEach
     void setUp() {
         saleRepository = mock(SaleRepository.class);
         saleLogRepository = mock(SaleLogRepository.class);
-        saleService = new SaleService(saleRepository, saleLogRepository);
+        productRepository = mock(ProductRepository.class);
+        saleLogService = mock(SaleLogService.class);
+        mercadoLivreListingService = mock(MercadoLivreListingService.class);
+        saleService = new SaleService(saleRepository, saleLogRepository, productRepository, saleLogService, mercadoLivreListingService);
     }
 
     @Test

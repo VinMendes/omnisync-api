@@ -3,6 +3,8 @@ package com.puccampinas.omnisync.core.product.service;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
+import com.puccampinas.omnisync.core.systemClient.service.SystemClientService;
 import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
@@ -46,6 +48,7 @@ class ProductServiceTest {
     private MarketplaceIntegrationRepository marketplaceIntegrationRepository;
     private UserService userService;
     private ProductService productService;
+    private SystemClientService systemClientService;
 
     @BeforeEach
     void setUp() {
@@ -53,15 +56,17 @@ class ProductServiceTest {
         productLogService = mock(ProductLogService.class);
         mercadoLivreListingService = mock(MercadoLivreListingService.class);
         marketplaceIntegrationRepository = mock(MarketplaceIntegrationRepository.class);
+        systemClientService = mock(SystemClientService.class);
         userService = mock(UserService.class);
         productService = new ProductService(
                 productRepository,
                 productLogService,
                 mercadoLivreListingService,
                 marketplaceIntegrationRepository,
-                userService
+                userService, 
+                systemClientService
         );
-        reset(productRepository, productLogService, mercadoLivreListingService, marketplaceIntegrationRepository, userService);
+        reset(productRepository, productLogService, mercadoLivreListingService, marketplaceIntegrationRepository, userService, systemClientService);
     }
 
     @Test
@@ -284,8 +289,53 @@ class ProductServiceTest {
         assertTrue(result.isActive());
         assertNotNull(result.getCreatedAt());
         verify(productRepository).save(any(Product.class));
+        verifyNoInteractions(mercadoLivreListingService);
+        verify(productLogService).logCreate(any(Product.class));
+    }
+
+    @Test
+    void createShouldCallCreateListingWhenAnnouncementIsTrueAndMlIntegrated() {
+        SystemClient systemClient = new SystemClient();
+        systemClient.setResource(Map.of("mercado_livre", true));
+
+        when(systemClientService.findActiveById(1L)).thenReturn(systemClient);
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            product.setId(10L);
+            return product;
+        });
+
+        ProductDto dto = validDto();
+        dto.setAnnouncement(true);
+        ProductDto result = productService.create(1L, dto);
+
+        assertEquals(10L, result.getId());
         verify(mercadoLivreListingService).createListing(eq(1L), any(Product.class));
         verify(productLogService).logCreate(any(Product.class));
+    }
+
+    @Test
+    void createShouldThrowWhenAnnouncementIsTrueButNotMlIntegrated() {
+        SystemClient systemClient = new SystemClient();
+        systemClient.setResource(Map.of("mercado_livre", false));
+
+        when(systemClientService.findActiveById(1L)).thenReturn(systemClient);
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            product.setId(10L);
+            return product;
+        });
+
+        ProductDto dto = validDto();
+        dto.setAnnouncement(true);
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> productService.create(1L, dto)
+        );
+
+        assertEquals("System client is not integrated with Mercado Livre.", error.getMessage());
+        verifyNoInteractions(mercadoLivreListingService);
     }
 
     @Test

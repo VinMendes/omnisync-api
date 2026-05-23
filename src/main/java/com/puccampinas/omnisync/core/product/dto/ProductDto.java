@@ -22,6 +22,7 @@ public class ProductDto {
     private boolean active;
     @JsonProperty("created_at")
     private LocalDateTime createdAt;
+    private boolean announcement;
 
     public Long getId() {
         return id;
@@ -107,5 +108,14 @@ public class ProductDto {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public boolean isAnnouncement() {
+        return announcement;
+    }
+
+    public void setAnnouncement(boolean announcement){
+        this.announcement = announcement ? announcement : false;
+
     }
 }

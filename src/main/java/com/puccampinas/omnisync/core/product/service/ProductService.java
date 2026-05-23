@@ -5,6 +5,8 @@ import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
+import com.puccampinas.omnisync.core.systemClient.service.SystemClientService;
 import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
@@ -34,19 +36,22 @@ public class ProductService {
     private final MercadoLivreListingService mercadoLivreListingService;
     private final MarketplaceIntegrationRepository marketplaceIntegrationRepository;
     private final UserService userService;
+    private final SystemClientService systemClientService;
 
     public ProductService(
             ProductRepository productRepository,
             ProductLogService productLogService,
             MercadoLivreListingService mercadoLivreListingService,
             MarketplaceIntegrationRepository marketplaceIntegrationRepository,
-            UserService userService
+            UserService userService,
+            SystemClientService systemClientService
     ) {
         this.productRepository = productRepository;
         this.productLogService = productLogService;
         this.mercadoLivreListingService = mercadoLivreListingService;
         this.marketplaceIntegrationRepository = marketplaceIntegrationRepository;
         this.userService = userService;
+        this.systemClientService = systemClientService;
     }
 
     @Transactional
@@ -60,7 +65,16 @@ public class ProductService {
         product.setActive(true);
 
         Product savedProduct = this.productRepository.save(product);
-        this.mercadoLivreListingService.createListing(systemClientId, savedProduct);
+
+        if (data.isAnnouncement()) {
+            SystemClient systemClient = systemClientService.findActiveById(systemClientId);
+            boolean isIntegratedMl = isMercadoLivreIntegrated(systemClient);
+            if (!isIntegratedMl) {
+                throw new IllegalStateException("System client is not integrated with Mercado Livre.");
+            }
+            this.mercadoLivreListingService.createListing(systemClientId, savedProduct);
+        }
+
         this.productLogService.logCreate(savedProduct);
 
         return toDto(savedProduct);
@@ -641,6 +655,15 @@ public class ProductService {
     }
 
     private record ProductSyncOutcome(String itemId, boolean created, boolean updated, boolean reactivated) {
+    }
+
+    private boolean isMercadoLivreIntegrated(SystemClient systemClient) {
+        Map<String, Object> resource = systemClient.getResource();
+        if (resource == null) {
+            return false;
+        }
+        Object value = resource.get("mercado_livre");
+        return Boolean.TRUE.equals(value);
     }
 
     private ProductDto toDto(Product product) {

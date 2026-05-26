@@ -7,6 +7,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/sales/{systemClientId}")
 public class SaleController {
@@ -18,12 +20,11 @@ public class SaleController {
     }
 
     @PostMapping
-    public ResponseEntity<SaleDto> create (
+    public ResponseEntity<List<SaleDto>> create(
             @PathVariable Long systemClientId,
-            @RequestBody SaleCreateRequest saleCreateRequest
-            )
-    {
-        return ResponseEntity.ok(this.saleService.create(systemClientId, saleCreateRequest));
+            @RequestBody List<SaleCreateRequest> requests
+    ) {
+        return ResponseEntity.ok(this.saleService.create(systemClientId, requests));
     }
 
     @GetMapping

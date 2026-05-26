@@ -19,6 +19,8 @@ import jakarta.transaction.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class SaleService {
 
@@ -37,35 +39,39 @@ public class SaleService {
     }
 
     @Transactional
-    public SaleDto create(Long systemClientId, SaleCreateRequest request) {
+    public List<SaleDto> create(Long systemClientId, List<SaleCreateRequest> requests) {
+        if (systemClientId == null || requests == null || requests.isEmpty()) {
+            throw new IllegalArgumentException("Dados do client e ao menos um item sao obrigatorios");
+        }
 
-        // Validações iniciais
-        if (systemClientId == null || request == null || request.getProductId() == null) {
-            throw new IllegalArgumentException("Dados do client, request e produto sao obrigatorios");
+        return requests.stream()
+                .map(request -> createSingle(systemClientId, request))
+                .toList();
+    }
+
+    private SaleDto createSingle(Long systemClientId, SaleCreateRequest request) {
+        if (request == null || request.getProductId() == null) {
+            throw new IllegalArgumentException("Dados do request e produto sao obrigatorios");
         }
 
         Product product = productRepository.findByIdAndSystemClientIdAndActiveTrue(
                         request.getProductId(), systemClientId)
-                .orElseThrow( () -> new EntityNotFoundException("Produto nao encontrado, inativo, ou nao pertence a este cliente"));
+                .orElseThrow(() -> new EntityNotFoundException("Produto nao encontrado, inativo, ou nao pertence a este cliente"));
 
         int availableStock = product.getStock() - product.getReservedStock();
 
         if (request.getQuantity() > availableStock) {
-            throw new IllegalArgumentException("Estoque insuficiente. Disponivel: " + availableStock);
+            throw new IllegalArgumentException("Estoque insuficiente para o produto " + request.getProductId() + ". Disponivel: " + availableStock);
         }
 
-        // Subtrair do estoque físico a quantidade vendida
         product.setStock(product.getStock() - request.getQuantity());
         Product savedProduct = productRepository.save(product);
 
-        // Define o canal da venda com segurança
         String channel = request.getChannel() != null ? request.getChannel().name() : SaleChannel.MANUAL.name();
 
-        // Se a venda não veio do ML, nós avisamos o ML que o estoque local caiu!
         if (!SaleChannel.MERCADO_LIVRE.name().equals(channel)) {
             String mlItemId = getMercadoLivreItemId(savedProduct);
 
-            // Se encontrou o ID do anúncio, manda a requisição pra nuvem
             if (mlItemId != null) {
                 try {
                     mercadoLivreListingService.updateListing(
@@ -75,16 +81,12 @@ public class SaleService {
                             savedProduct
                     );
                 } catch (Exception ex) {
-                    // BLINDAGEM DE ARQUITETURA:
-                    // Se o ML cair, demorar ou recusar a atualização (ex: anúncio free),
-                    // o erro morre aqui e a venda da loja física finaliza com sucesso!
                     System.out.println("Aviso: Não foi possível sincronizar o estoque no Mercado Livre para o item "
                             + mlItemId + ". Motivo: " + ex.getMessage());
                 }
             }
         }
 
-        // Finalmente, montar e salvar a venda
         Sale sale = new Sale();
         sale.setSystemClientId(systemClientId);
         sale.setProductId(savedProduct.getId());

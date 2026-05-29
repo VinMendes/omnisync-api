@@ -6,6 +6,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/products/{systemClientId}")
 public class ProductController {
@@ -56,6 +58,15 @@ public class ProductController {
             @RequestBody ProductDto data
     ) {
         return ResponseEntity.ok(this.service.update(systemClientId, id, data));
+    }
+
+    @PostMapping("/{id}/announce")
+    public ResponseEntity<ProductDto> announce(
+            @PathVariable Long systemClientId,
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> mlResource
+    ) {
+        return ResponseEntity.ok(this.service.announce(systemClientId, id, mlResource));
     }
 
     @DeleteMapping("/{id}")

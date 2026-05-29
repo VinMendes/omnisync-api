@@ -80,6 +80,35 @@ public class ProductService {
         return toDto(savedProduct);
     }
 
+    @Transactional
+    public ProductDto announce(Long systemClientId, Long id, Map<String, Object> mlResource) {
+        validateIdentifiers(systemClientId, id);
+
+        Product product = findActiveById(systemClientId, id);
+
+        String existingItemId = extractMercadoLivreItemIdOrNull(product.getResource());
+        if (existingItemId != null) {
+            throw new IllegalStateException("Produto ja possui anuncio no Mercado Livre: " + existingItemId);
+        }
+
+        SystemClient systemClient = systemClientService.findActiveById(systemClientId);
+        if (!isMercadoLivreIntegrated(systemClient)) {
+            throw new IllegalStateException("System client is not integrated with Mercado Livre.");
+        }
+
+        Map<String, Object> resource = product.getResource() == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(product.getResource());
+        if (mlResource != null && !mlResource.isEmpty()) {
+            resource.put("mercado_livre", mlResource);
+        }
+        product.setResource(resource);
+
+        this.mercadoLivreListingService.createListing(systemClientId, product);
+
+        return toDto(product);
+    }
+
     public Page<ProductDto> getAll(Long systemClientId, long offset, int limit) {
         validateSystemClientId(systemClientId);
         validatePagination(offset, limit);
@@ -111,7 +140,7 @@ public class ProductService {
 
         Product existing = findActiveById(systemClientId, id);
         Product previousState = copy(existing);
-        String itemId = extractMercadoLivreItemId(existing);
+        String itemId = extractMercadoLivreItemIdOrNull(existing.getResource());
         existing.setSystemClientId(systemClientId);
         existing.setSku(data.getSku());
         existing.setName(data.getName());
@@ -122,7 +151,11 @@ public class ProductService {
         existing.setResource(mergeResourceForUpdate(existing.getResource(), data.getResource(), itemId));
 
         Product updatedProduct = this.productRepository.save(existing);
-        this.mercadoLivreListingService.updateListing(systemClientId, id, itemId, updatedProduct);
+
+        if (itemId != null) {
+            this.mercadoLivreListingService.updateListing(systemClientId, id, itemId, updatedProduct);
+        }
+
         this.productLogService.logEdit(previousState, updatedProduct);
 
         return toDto(updatedProduct);
@@ -136,7 +169,12 @@ public class ProductService {
         existing.setActive(false);
 
         Product deletedProduct = this.productRepository.save(existing);
-        this.mercadoLivreListingService.deleteListing(systemClientId, deletedProduct);
+
+        String itemId = extractMercadoLivreItemIdOrNull(deletedProduct.getResource());
+        if (itemId != null) {
+            this.mercadoLivreListingService.deleteListing(systemClientId, deletedProduct);
+        }
+
         this.productLogService.logDelete(previousState, deletedProduct);
 
         return toDto(deletedProduct);
@@ -303,10 +341,12 @@ public class ProductService {
             }
         }
 
-        Map<String, Object> mercadoLivre = currentMercadoLivreResource(incomingResource);
-        mercadoLivre.put("item_id", itemId);
+        if (itemId != null) {
+            Map<String, Object> mercadoLivre = currentMercadoLivreResource(incomingResource);
+            mercadoLivre.put("item_id", itemId);
+            merged.put("mercado_livre", mercadoLivre);
+        }
 
-        merged.put("mercado_livre", mercadoLivre);
         return merged;
     }
 

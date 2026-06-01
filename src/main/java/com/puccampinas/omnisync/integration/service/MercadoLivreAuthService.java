@@ -91,6 +91,9 @@ public class MercadoLivreAuthService {
         integration.setActive(true);
 
         repository.save(integration);
+
+        systemClientService.markMarketplaceConnected(systemClientId, "mercado_livre");
+
         return systemClientId;
     }
 

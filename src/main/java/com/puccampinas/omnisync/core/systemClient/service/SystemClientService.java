@@ -6,6 +6,7 @@ import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
+import java.util.HashMap;
 import java.util.Map;
 
 @Service
@@ -23,7 +24,7 @@ public class SystemClientService {
         SystemClient client = new SystemClient();
         client.setName(data.getName());
         client.setDocument(normalizedDocument);
-        client.setResource(data.getResource());
+        client.setResource(buildDefaultMarketplaces());
         client.setActive(true);
 
         return this.repository.save(client);
@@ -87,6 +88,30 @@ public class SystemClientService {
         client.setResource(data);
 
         return this.repository.save(client);
+    }
+
+    public SystemClient markMarketplaceConnected(long id, String marketplaceKey) {
+        SystemClient client = findActiveById(id);
+
+        Map<String, Object> resource = client.getResource();
+        if (resource == null) {
+            resource = buildDefaultMarketplaces();
+        } else {
+            resource = new HashMap<>(resource);
+        }
+
+        resource.put(marketplaceKey, true);
+        client.setResource(resource);
+
+        return this.repository.save(client);
+    }
+
+    private Map<String, Object> buildDefaultMarketplaces() {
+        Map<String, Object> marketplaces = new HashMap<>();
+        marketplaces.put("amazon", false);
+        marketplaces.put("shoppe", false);
+        marketplaces.put("mercado_livre", false);
+        return marketplaces;
     }
 
     public SystemClient findActiveById(long id) {

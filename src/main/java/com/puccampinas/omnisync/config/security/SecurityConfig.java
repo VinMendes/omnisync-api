@@ -111,6 +111,7 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/integrations/mercadolivre/callback",
                                 "/api/integrations/mercadolivre/webhooks/**",
+                                "/notifications",
                                 "/api/client/**"
                         ).permitAll()
                         .anyRequest().authenticated()

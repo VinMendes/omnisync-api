@@ -1,0 +1,25 @@
+Nginx do OmniSync
+
+Arquivo original:
+ /etc/nginx/sites-available/omnisync
+
+Ativo por symlink:
+ /etc/nginx/sites-enabled/omnisync -> /etc/nginx/sites-available/omnisync
+
+Domínios:
+ omnisync.site
+ www.omnisync.site
+
+Aplicação Spring:
+ http://127.0.0.1:8080
+
+SSL:
+ Gerado por Certbot/Let's Encrypt
+ Comando para gerar novamente:
+ sudo certbot --nginx -d omnisync.site -d www.omnisync.site
+
+Testar Nginx:
+ sudo nginx -t
+
+Recarregar Nginx:
+ sudo systemctl reload nginx

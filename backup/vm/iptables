@@ -1,0 +1,19 @@
+Chain INPUT (policy ACCEPT 0 packets, 0 bytes)
+ pkts bytes target     prot opt in     out     source               destination
+  15M 5074M ACCEPT     0    --  *      *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+   10   752 ACCEPT     1    --  *      *       0.0.0.0/0            0.0.0.0/0
+ 367K   34M ACCEPT     0    --  lo     *       0.0.0.0/0            0.0.0.0/0
+ 318K   18M ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            state NEW tcp dpt:22
+24044 1325K ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:8080
+ 139K 8245K ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:5432
+ 306K   16M ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:80 state NEW
+5489K  286M ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 state NEW
+ 5706  321K ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:8000
+28373   12M REJECT     0    --  *      *       0.0.0.0/0            0.0.0.0/0            reject-with icmp-host-prohibited
+    0     0 ACCEPT     0    --  *      *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+    0     0 ACCEPT     1    --  *      *       0.0.0.0/0            0.0.0.0/0
+    0     0 ACCEPT     0    --  lo     *       0.0.0.0/0            0.0.0.0/0
+    0     0 ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            state NEW tcp dpt:22
+    0     0 ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:8080
+    0     0 ACCEPT     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:5432
+    0     0 REJECT     0    --  *      *       0.0.0.0/0            0.0.0.0/0            reject-with icmp-host-prohibited

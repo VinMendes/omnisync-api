@@ -3,6 +3,7 @@ package com.puccampinas.omnisync.core.users.controller;
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import org.junit.jupiter.api.Test;
@@ -95,7 +96,7 @@ class UserTenantIsolationIntegrationTest {
         mockMvc.perform(put("/api/users/1")
                         .principal(authentication())
                         .contentType("application/json")
-                        .content("{\"resource\":{\"role\":\"super-admin\",\"permissions\":[\"all\"]}}"))
+                        .content("{\"role\":\"ADMIN\",\"permissions\":[\"USER_MANAGE\"]}"))
                 .andExpect(status().isForbidden());
 
         verify(userRepository, never()).save(org.mockito.ArgumentMatchers.any(User.class));
@@ -111,7 +112,7 @@ class UserTenantIsolationIntegrationTest {
         mockMvc.perform(put("/api/users/1")
                         .principal(authentication())
                         .contentType("application/json")
-                        .content("{\"resource\":{\"role\":\"manager\",\"permissions\":[\"Vendas\"]}}"))
+                        .content("{\"role\":\"MANAGER\",\"permissions\":[\"SALE_READ\",\"SALE_WRITE\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resource.role").value("manager"));
 
@@ -144,10 +145,10 @@ class UserTenantIsolationIntegrationTest {
         user.setEmail(email);
         user.setName(name);
         user.setActive(true);
-        user.setResource(Map.of(
+        user.setResource(UserResource.create(Map.of(
                 "role", role,
                 "permissions", List.of("Gestão de usuários")
-        ));
+        ), null, null));
         return user;
     }
 

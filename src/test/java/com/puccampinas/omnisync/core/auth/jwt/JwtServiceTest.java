@@ -1,14 +1,25 @@
 package com.puccampinas.omnisync.core.auth.jwt;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtBuilder;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class JwtServiceTest {
 
+    private static final String TEST_SECRET = "minha-chave-super-segura-com-mais-de-32-caracteres-123456";
+
     private final JwtService jwtService = new JwtService(
-            "minha-chave-super-segura-com-mais-de-32-caracteres-123456",
+            TEST_SECRET,
             15,
             7
     );
@@ -85,5 +96,58 @@ class JwtServiceTest {
         assertNotNull(accessToken);
         assertNotNull(refreshToken);
         assertNotEquals(accessToken, refreshToken);
+    }
+
+    @Test
+    void shouldRejectExpiredToken() {
+        String token = sign(Jwts.builder().subject("user@example.com")
+                .expiration(Date.from(Instant.now().minusSeconds(60))));
+
+        assertThrows(ExpiredJwtException.class, () -> jwtService.validateAndGetClaims(token));
+    }
+
+    @Test
+    void shouldRejectTokenSignedWithAnotherKey() {
+        String token = new JwtService("another-test-key-with-at-least-32-bytes-123456789", 15, 7)
+                .generateAccessToken("user@example.com");
+
+        assertThrows(JwtException.class, () -> jwtService.validateAndGetClaims(token));
+    }
+
+    @Test
+    void shouldRejectTokenWithoutSubject() {
+        String token = sign(Jwts.builder().expiration(Date.from(Instant.now().plusSeconds(60))));
+
+        assertThrows(IllegalArgumentException.class, () -> jwtService.validateAndGetClaims(token));
+    }
+
+    @Test
+    void shouldRejectTokenWithoutExpiration() {
+        String token = sign(Jwts.builder().subject("user@example.com"));
+
+        assertThrows(IllegalArgumentException.class, () -> jwtService.validateAndGetClaims(token));
+    }
+
+    @Test
+    void shouldRejectTokenWithoutTokenType() {
+        String token = sign(Jwts.builder().subject("user@example.com")
+                .expiration(Date.from(Instant.now().plusSeconds(60))));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> jwtService.validateAndGetClaims(token, JwtService.TYPE_ACCESS));
+    }
+
+    @Test
+    void shouldRejectMalformedAndUnsignedTokens() {
+        String unsigned = Jwts.builder().subject("user@example.com")
+                .expiration(Date.from(Instant.now().plusSeconds(60))).compact();
+
+        assertThrows(JwtException.class, () -> jwtService.validateAndGetClaims("not-a-jwt"));
+        assertThrows(JwtException.class, () -> jwtService.validateAndGetClaims(unsigned));
+    }
+
+    private String sign(JwtBuilder builder) {
+        return builder.signWith(Keys.hmacShaKeyFor(TEST_SECRET.getBytes(StandardCharsets.UTF_8)), Jwts.SIG.HS256)
+                .compact();
     }
 }

@@ -2,6 +2,7 @@ package com.puccampinas.omnisync.core.product.controller;
 
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.service.ProductService;
 import jakarta.persistence.EntityNotFoundException;
@@ -31,6 +32,9 @@ class ProductControllerTest {
 
     @MockitoBean
     private JwtService jwtService;
+
+    @MockitoBean
+    private CustomUserDetailsService userDetailsService;
 
     @MockitoBean
     private AuthCookieService authCookieService;

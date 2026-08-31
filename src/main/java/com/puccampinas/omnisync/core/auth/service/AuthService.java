@@ -6,6 +6,8 @@ import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
 import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
 import com.puccampinas.omnisync.core.auth.dto.ResetPasswordRequest;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
+import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetEmailService;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetToken;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenRepository;
@@ -13,6 +15,9 @@ import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +26,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.Locale;
 
 /**
  * Serviço responsável pela regra de negócio da autenticação.
@@ -72,6 +78,9 @@ public class AuthService {
 
     private final String resetPasswordUrl;
 
+    private final AuthenticationManager authenticationManager;
+    private final CustomUserDetailsService userDetailsService;
+
     /**
      * Construtor com injeção de dependências.
      *
@@ -86,13 +95,17 @@ public class AuthService {
                        JwtService jwtService,
                        PasswordResetTokenRepository passwordResetTokenRepository,
                        PasswordResetEmailService passwordResetEmailService,
-                       @Value("${app.frontend.reset-password-url}") String resetPasswordUrl) {
+                       @Value("${app.frontend.reset-password-url}") String resetPasswordUrl,
+                       AuthenticationManager authenticationManager,
+                       CustomUserDetailsService userDetailsService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordResetEmailService = passwordResetEmailService;
         this.resetPasswordUrl = resetPasswordUrl;
+        this.authenticationManager = authenticationManager;
+        this.userDetailsService = userDetailsService;
     }
 
     /**
@@ -124,28 +137,24 @@ public class AuthService {
     }
 
     /**
-     * Autentica um usuário a partir de email e senha.
+     * Autentica pelo ProviderManager/DaoAuthenticationProvider e emite os tokens.
      *
      * @param req credenciais informadas no login
-     * @return usuário autenticado
-     * @throws RuntimeException se o usuário não existir, estiver inativo ou a senha estiver incorreta
+     * @return resposta no formato já consumido pelo frontend
+     * @throws org.springframework.security.core.AuthenticationException se as credenciais ou a conta forem inválidas
      */
-    public User authenticate(LoginRequest req) {
-        String normalizedEmail = normalizeEmail(req.email());
+    public AuthResponse login(LoginRequest req) {
+        Authentication authentication = authenticationManager.authenticate(
+                UsernamePasswordAuthenticationToken.unauthenticated(normalizeEmail(req.email()), req.password())
+        );
+        OmniUserPrincipal principal = (OmniUserPrincipal) authentication.getPrincipal();
 
-        User user = userRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new RuntimeException("Credenciais inválidas"));
-
-        if (!Boolean.TRUE.equals(user.getActive())) {
-            throw new RuntimeException("Usuário inativo");
-        }
-
-        boolean passwordMatches = passwordEncoder.matches(req.password(), user.getPasswordHash());
-        if (!passwordMatches) {
-            throw new RuntimeException("Credenciais inválidas");
-        }
-
-        return user;
+        return new AuthResponse(
+                "Login realizado com sucesso", principal.getUserId(), principal.getName(),
+                principal.getEmail(), principal.isUserActive(),
+                jwtService.generateAccessToken(principal.getUsername()),
+                jwtService.generateRefreshToken(principal.getUsername())
+        );
     }
 
     /**
@@ -294,16 +303,8 @@ public class AuthService {
      */
     public String refreshAccessToken(String refreshToken) {
         Claims claims = jwtService.validateAndGetClaims(refreshToken, JwtService.TYPE_REFRESH);
-        String email = claims.getSubject();
-
-        User user = userRepository.findByEmail(normalizeEmail(email))
-                .orElseThrow(() -> new RuntimeException("Usuário do refresh não encontrado"));
-
-        if (!Boolean.TRUE.equals(user.getActive())) {
-            throw new RuntimeException("Usuário inativo");
-        }
-
-        return jwtService.generateAccessToken(user.getEmail());
+        OmniUserPrincipal principal = userDetailsService.loadActiveUserByUsername(claims.getSubject());
+        return jwtService.generateAccessToken(principal.getUsername());
     }
 
     /**
@@ -357,6 +358,6 @@ public class AuthService {
      * @return email normalizado
      */
     private String normalizeEmail(String email) {
-        return email == null ? null : email.trim().toLowerCase();
+        return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
     }
 }

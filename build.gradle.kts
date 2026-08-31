@@ -43,6 +43,12 @@ dependencies {
     // TESTES (mantendo os seus + adicionando o necessário)
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
+    // PostgreSQL descartável para JSONB/Flyway nos testes, sem Docker e sem usar DB_URL da VM.
+    testImplementation("io.zonky.test:embedded-postgres:2.2.2")
+    if (System.getProperty("os.arch") in listOf("aarch64", "arm64")) {
+        val platform = if (System.getProperty("os.name").startsWith("Mac")) "darwin" else "linux"
+        testRuntimeOnly("io.zonky.test.postgres:embedded-postgres-binaries-$platform-arm64v8:14.22.0")
+    }
 
     testImplementation("org.springframework.boot:spring-boot-starter-amqp-test")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")

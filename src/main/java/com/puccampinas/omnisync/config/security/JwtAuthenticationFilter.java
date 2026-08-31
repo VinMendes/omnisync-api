@@ -2,20 +2,24 @@ package com.puccampinas.omnisync.config.security;
 
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
+import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * Filtro de autenticação que lê o <strong>Access Token</strong> (JWT)
@@ -42,7 +46,8 @@ import java.util.List;
  *     <li>Tenta extrair o Access Token do header Bearer</li>
  *     <li>Se não existir Bearer, tenta extrair do cookie</li>
  *     <li>Valida o JWT (assinatura + expiração + tipo=access)</li>
- *     <li>Se for válido, cria um Authentication e salva no SecurityContext</li>
+ *     <li>Carrega usuário/empresa ativos do banco e monta o principal</li>
+ *     <li>Cria um Authentication e salva no SecurityContext</li>
  *     <li>Segue o fluxo chamando {@code filterChain.doFilter()}</li>
  * </ol>
  *
@@ -64,15 +69,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      */
     private final AuthCookieService authCookieService;
 
+    private final CustomUserDetailsService userDetailsService;
+
     /**
      * Construtor com injeção de dependências.
      *
      * @param jwtService serviço para validação e extração de dados do JWT
      * @param authCookieService serviço de utilidades para cookies de autenticação
+     * @param userDetailsService serviço de carregamento da identidade atual do usuário
      */
-    public JwtAuthenticationFilter(JwtService jwtService, AuthCookieService authCookieService) {
+    public JwtAuthenticationFilter(JwtService jwtService, AuthCookieService authCookieService,
+                                   CustomUserDetailsService userDetailsService) {
         this.jwtService = jwtService;
         this.authCookieService = authCookieService;
+        this.userDetailsService = userDetailsService;
     }
 
     /**
@@ -115,20 +125,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                  */
                 Claims claims = jwtService.validateAndGetClaims(accessToken, JwtService.TYPE_ACCESS);
 
-                String username = claims.getSubject();
+                OmniUserPrincipal principal = userDetailsService.loadActiveUserByUsername(claims.getSubject());
 
-                // ROLE fixa só pra demo
                 UsernamePasswordAuthenticationToken auth =
-                        new UsernamePasswordAuthenticationToken(
-                                username,
+                        UsernamePasswordAuthenticationToken.authenticated(
+                                principal,
                                 null,
-                                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                                principal.getAuthorities()
                         );
+                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                SecurityContextHolder.getContext().setAuthentication(auth);
+                SecurityContext context = SecurityContextHolder.createEmptyContext();
+                context.setAuthentication(auth);
+                SecurityContextHolder.setContext(context);
 
-            } catch (Exception ignored) {
-                // Token inválido/expirado -> não autentica
+            } catch (JwtException | AuthenticationException | IllegalArgumentException ignored) {
+                // Credenciais inválidas ou conta indisponível: não autentica. Falhas de infraestrutura propagam.
                 SecurityContextHolder.clearContext();
             }
         }

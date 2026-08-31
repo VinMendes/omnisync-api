@@ -1,10 +1,12 @@
 package com.puccampinas.omnisync.core.auth.security;
 
+import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import org.springframework.security.authentication.AccountStatusUserDetailsChecker;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -13,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
 
 /** Carrega a identidade atual do banco tanto para o login quanto para tokens já validados. */
 @Service
@@ -40,12 +44,19 @@ public class CustomUserDetailsService implements UserDetailsService {
         SystemClient client = systemClientRepository.findById(user.getSystemClientId())
                 .orElseThrow(() -> new UsernameNotFoundException("Empresa do usuário não encontrada."));
 
-        // O resource ainda não tem contrato de segurança; não convertemos seu JSON livre em authorities.
+        // UserResource é o contrato tipado persistido no JSONB; textos desconhecidos não viram authorities.
         return new OmniUserPrincipal(
                 user.getId(), user.getSystemClientId(), user.getName(), user.getEmail(),
-                user.getPasswordHash(), Boolean.TRUE.equals(user.getActive()), client.getActive(),
-                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                user.getPasswordHash(), Boolean.TRUE.equals(user.getActive()), client.getActive(), authoritiesOf(user)
         );
+    }
+
+    private List<GrantedAuthority> authoritiesOf(User user) {
+        Set<String> authorities = new TreeSet<>();
+        UserResource resource = user.getResource();
+        authorities.add("ROLE_" + resource.role().name());
+        resource.permissions().forEach(permission -> authorities.add(permission.name()));
+        return authorities.stream().<GrantedAuthority>map(SimpleGrantedAuthority::new).toList();
     }
 
     /**

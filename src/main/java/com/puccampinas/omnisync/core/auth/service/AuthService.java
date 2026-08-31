@@ -12,6 +12,7 @@ import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetEmailServic
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetToken;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import org.springframework.transaction.annotation.Transactional;
@@ -116,6 +117,7 @@ public class AuthService {
      * @throws RuntimeException se já existir usuário com o email informado
      */
     public User register(RegisterRequest req) {
+        UserResource resource = UserResource.create(req.resource(), req.role(), req.permissions());
         String normalizedEmail = normalizeEmail(req.email());
 
         if (userRepository.existsByEmail(normalizedEmail)) {
@@ -129,9 +131,7 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setActive(true);
 
-        if (req.resource() != null) {
-            user.setResource(req.resource());
-        }
+        user.setResource(resource);
 
         return userRepository.save(user);
     }

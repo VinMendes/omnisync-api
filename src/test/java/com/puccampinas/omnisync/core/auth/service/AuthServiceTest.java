@@ -80,7 +80,7 @@ class AuthServiceTest {
         assertThat(savedUser.getEmail()).isEqualTo("vini@email.com");
         assertThat(savedUser.getPasswordHash()).isEqualTo("hashed-password");
         assertThat(savedUser.getActive()).isTrue();
-        assertThat(savedUser.getResource()).containsEntry("cpf", "test");
+        assertThat(savedUser.getResource().attributes()).containsEntry("cpf", "test");
         verify(userRepository).save(any(User.class));
         verifyNoInteractions(authenticationManager);
     }

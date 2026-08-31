@@ -1,6 +1,9 @@
 package com.puccampinas.omnisync.core.auth.security;
 
 import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
+import com.puccampinas.omnisync.core.users.entity.UserResource;
+import com.puccampinas.omnisync.core.users.enums.Permission;
+import com.puccampinas.omnisync.core.users.enums.Role;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
@@ -16,6 +19,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,13 +68,13 @@ class CustomUserDetailsServiceTest {
     }
 
     @Test
-    void shouldNotTrustUnstructuredResourceForAuthorities() {
+    void shouldNeverGrantUnknownAuthoritiesFromMalformedLegacyResource() {
         stubUserAndClient();
-        user.setResource(Map.of("role", "superuser",
-                "permissions", List.of("USER_MANAGE", "ALL_POWERS")));
+        user.setResource(UserResource.fromStoredJson(Map.of("role", "superuser",
+                "permissions", List.of("USER_MANAGE", "ALL_POWERS"))));
 
         assertThat(service.loadUserByUsername("user@example.com").getAuthorities()).extracting("authority")
-                .containsExactly("ROLE_USER");
+                .containsExactly("PRODUCT_READ", "ROLE_VIEWER", "SALE_READ");
     }
 
     @Test
@@ -123,6 +127,28 @@ class CustomUserDetailsServiceTest {
 
         assertThatThrownBy(() -> service.loadActiveUserByUsername("user@example.com"))
                 .isInstanceOf(DisabledException.class);
+    }
+
+    @Test
+    void shouldLoadPersistedRoleAndPermissionAuthorities() {
+        stubUserAndClient();
+        user.setResource(new UserResource(Role.ADMIN, Set.of(Permission.PRODUCT_READ, Permission.USER_MANAGE), Map.of()));
+
+        assertThat(service.loadUserByUsername("user@example.com").getAuthorities()).extracting("authority")
+                .containsExactly("PRODUCT_READ", "ROLE_ADMIN", "USER_MANAGE");
+    }
+
+    @Test
+    void shouldReloadPermissionsWithoutMutatingAnExistingPrincipal() {
+        stubUserAndClient();
+        user.setResource(new UserResource(Role.VIEWER, Set.of(Permission.PRODUCT_READ), Map.of()));
+        OmniUserPrincipal first = service.loadActiveUserByUsername("user@example.com");
+
+        user.setResource(new UserResource(Role.VIEWER, Set.of(), Map.of()));
+        OmniUserPrincipal current = service.loadActiveUserByUsername("user@example.com");
+
+        assertThat(first.getAuthorities()).extracting("authority").containsExactly("PRODUCT_READ", "ROLE_VIEWER");
+        assertThat(current.getAuthorities()).extracting("authority").containsExactly("ROLE_VIEWER");
     }
 
     private void stubUserAndClient() {

@@ -1,12 +1,12 @@
 package com.puccampinas.omnisync.core.auth.dto;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.Map;
+import java.util.List;
 
 public record RegisterRequest(
 
@@ -26,6 +26,11 @@ public record RegisterRequest(
         @Size(min = 6, max = 100, message = "password deve ter entre 6 e 100 caracteres")
         String password,
 
-        Map<String, Object> resource
+        Map<String, Object> resource,
+        String role,
+        List<String> permissions
 ) {
+    public RegisterRequest(Long systemClientId, String name, String email, String password, Map<String, Object> resource) {
+        this(systemClientId, name, email, password, resource, null, null);
+    }
 }

@@ -2,6 +2,7 @@ package com.puccampinas.omnisync.core.sale.controller;
 
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.sale.dto.SaleDto;
 import com.puccampinas.omnisync.core.sale.dto.SaleLogDto;
 import com.puccampinas.omnisync.core.sale.service.SaleService;
@@ -36,6 +37,9 @@ class SaleControllerTest {
 
     @MockitoBean
     private JwtService jwtService;
+
+    @MockitoBean
+    private CustomUserDetailsService userDetailsService;
 
     @MockitoBean
     private AuthCookieService authCookieService;

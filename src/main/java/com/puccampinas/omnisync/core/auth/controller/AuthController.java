@@ -9,11 +9,14 @@ import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
 import com.puccampinas.omnisync.core.auth.dto.ResetPasswordRequest;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
 import com.puccampinas.omnisync.core.users.entity.User;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -141,23 +144,14 @@ public class AuthController {
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest req,
                                    HttpServletResponse response) {
         try {
-            User user = authService.authenticate(req);
-
-            String access = authService.generateAccessToken(user);
-            String refresh = authService.generateRefreshToken(user);
-
-            setAuthCookies(response, access, refresh);
-
-            AuthResponse authResponse = authService.buildAuthResponse(
-                    "Login realizado com sucesso",
-                    user,
-                    access,
-                    refresh
-            );
+            AuthResponse authResponse = authService.login(req);
+            setAuthCookies(response, authResponse.accessToken(), authResponse.refreshToken());
 
             return ResponseEntity.ok(authResponse);
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(401).body(e.getMessage());
+        } catch (AuthenticationServiceException e) {
+            return ResponseEntity.status(503).body("Serviço de autenticação indisponível");
+        } catch (AuthenticationException e) {
+            return ResponseEntity.status(401).body("Credenciais inválidas");
         }
     }
 
@@ -241,10 +235,7 @@ public class AuthController {
             );
 
             return ResponseEntity.ok(refreshResponse);
-        } catch (RuntimeException e) {
-            authCookieService.clearAuthCookies(response);
-            return ResponseEntity.status(401).body(e.getMessage());
-        } catch (Exception e) {
+        } catch (JwtException | AuthenticationException | IllegalArgumentException e) {
             authCookieService.clearAuthCookies(response);
             return ResponseEntity.status(401).body("Refresh inválido ou expirado");
         }

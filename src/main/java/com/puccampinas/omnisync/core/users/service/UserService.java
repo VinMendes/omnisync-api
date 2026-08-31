@@ -4,6 +4,7 @@ import com.puccampinas.omnisync.core.users.dto.UserResponse;
 import com.puccampinas.omnisync.core.users.dto.UserStatusUpdateRequest;
 import com.puccampinas.omnisync.core.users.dto.UserUpdateRequest;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
@@ -54,6 +55,7 @@ public class UserService {
                 .toList();
     }
 
+
     public UserResponse update(String authenticatedEmail, Long id, UserUpdateRequest request) {
         User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
         User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
@@ -63,6 +65,7 @@ public class UserService {
                 && changesOwnPrivileges(user.getResource(), request.resource())) {
             throw new AccessDeniedException("Não é permitido alterar o próprio papel ou permissões.");
         }
+
 
         if (request.email() != null) {
             String normalizedEmail = request.email().trim().toLowerCase();
@@ -88,9 +91,7 @@ public class UserService {
             user.setName(trimmedName);
         }
 
-        if (request.resource() != null) {
-            user.setResource(request.resource());
-        }
+        user.setResource(resource);
 
         User savedUser = userRepository.save(user);
         return toResponse(savedUser);
@@ -142,9 +143,11 @@ public class UserService {
                 user.getSystemClientId(),
                 user.getName(),
                 user.getEmail(),
-                user.getResource(),
+                user.getResource().toLegacyJson(),
                 user.getActive(),
-                user.getCreatedAt()
+                user.getCreatedAt(),
+                user.getResource().role().name(),
+                user.getResource().permissionNames()
         );
     }
 }

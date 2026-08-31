@@ -134,7 +134,7 @@ public class JwtService {
      *
      * <p>
      * O Access Token tem vida curta e é o token usado para autenticar requests
-     * em rotas protegidas (via filtro {@code JwtCookieAuthFilter}).
+     * em rotas protegidas (via filtro {@code JwtAuthenticationFilter}).
      * </p>
      *
      * @param username usuário que será definido como subject do token
@@ -208,11 +208,15 @@ public class JwtService {
      * @return payload (claims) do token
      */
     public Claims validateAndGetClaims(String token) {
-        return Jwts.parser()
+        Claims claims = Jwts.parser()
                 .verifyWith((javax.crypto.SecretKey) key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+        if (claims.getSubject() == null || claims.getSubject().isBlank() || claims.getExpiration() == null) {
+            throw new IllegalArgumentException("Token deve conter subject e expiração.");
+        }
+        return claims;
     }
 
     /**

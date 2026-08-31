@@ -2,6 +2,7 @@ package com.puccampinas.omnisync.integration.controller;
 
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.product.service.ProductService;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
 import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
@@ -35,6 +36,9 @@ class MercadoLivreCatalogControllerTest {
 
     @MockitoBean
     private JwtService jwtService;
+
+    @MockitoBean
+    private CustomUserDetailsService userDetailsService;
 
     @MockitoBean
     private AuthCookieService authCookieService;

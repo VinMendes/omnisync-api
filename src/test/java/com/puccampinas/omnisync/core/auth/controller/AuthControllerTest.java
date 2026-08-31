@@ -5,6 +5,7 @@ import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
 import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
 import com.puccampinas.omnisync.core.users.entity.User;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,9 @@ class AuthControllerTest {
 
     @MockitoBean
     private JwtService jwtService;
+
+    @MockitoBean
+    private CustomUserDetailsService userDetailsService;
 
     @Test
     void ping() throws Exception {
@@ -95,20 +99,7 @@ class AuthControllerTest {
                 "123456"
         );
 
-        User user = new User();
-        user.setName("Vinicius");
-        user.setEmail("vini@email.com");
-        user.setActive(true);
-
-        when(authService.authenticate(any(LoginRequest.class))).thenReturn(user);
-        when(authService.generateAccessToken(user)).thenReturn("access-token");
-        when(authService.generateRefreshToken(user)).thenReturn("refresh-token");
-        when(authService.buildAuthResponse(
-                "Login realizado com sucesso",
-                user,
-                "access-token",
-                "refresh-token"
-        )).thenReturn(new com.puccampinas.omnisync.core.auth.dto.AuthResponse(
+        when(authService.login(any(LoginRequest.class))).thenReturn(new com.puccampinas.omnisync.core.auth.dto.AuthResponse(
                 "Login realizado com sucesso",
                 null,
                 "Vinicius",

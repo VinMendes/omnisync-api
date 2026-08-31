@@ -5,7 +5,6 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 @Entity
 @Table(name = "users")
@@ -26,7 +25,7 @@ public class User {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "resource", columnDefinition = "jsonb")
-    private Map<String, Object> resource;
+    private UserResource resource = UserResource.defaults();
 
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
@@ -82,11 +81,11 @@ public class User {
         this.email = email == null ? null : email.trim().toLowerCase();
     }
 
-    public Map<String, Object> getResource() {
-        return resource;
+    public UserResource getResource() {
+        return resource == null ? UserResource.defaults() : resource;
     }
 
-    public void setResource(Map<String, Object> resource) {
+    public void setResource(UserResource resource) {
         this.resource = resource;
     }
 

@@ -6,6 +6,7 @@ import com.puccampinas.omnisync.core.users.dto.UserUpdateRequest;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -37,44 +38,50 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<?> findById(@PathVariable Long id) {
+    public ResponseEntity<?> findById(@PathVariable Long id, Authentication authentication) {
         try {
-            return ResponseEntity.ok(userService.findById(id));
+            return ResponseEntity.ok(userService.findById(authentication.getName(), id));
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(404).body(e.getMessage());
         }
     }
 
     @GetMapping
-    public ResponseEntity<List<UserResponse>> findAll() {
-        return ResponseEntity.ok(userService.findAll());
+    public ResponseEntity<List<UserResponse>> findAll(Authentication authentication) {
+        return ResponseEntity.ok(userService.findAll(authentication.getName()));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> update(
             @PathVariable Long id,
-            @RequestBody UserUpdateRequest request
+            @RequestBody UserUpdateRequest request,
+            Authentication authentication
     ) {
         try {
-            return ResponseEntity.ok(userService.update(id, request));
+            return ResponseEntity.ok(userService.update(authentication.getName(), id, request));
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(404).body(e.getMessage());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(403).body(e.getMessage());
         }
     }
 
     @PatchMapping("/{id}/status")
     public ResponseEntity<?> updateStatus(
             @PathVariable Long id,
-            @RequestBody UserStatusUpdateRequest request
+            @RequestBody UserStatusUpdateRequest request,
+            Authentication authentication
     ) {
         try {
-            return ResponseEntity.ok(userService.updateStatus(id, request));
+            return ResponseEntity.ok(userService.updateStatus(authentication.getName(), id, request));
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(404).body(e.getMessage());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(403).body(e.getMessage());
         }
     }
 }

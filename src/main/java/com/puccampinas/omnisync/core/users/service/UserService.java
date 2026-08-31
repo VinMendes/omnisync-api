@@ -8,8 +8,11 @@ import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class UserService {
@@ -37,21 +40,32 @@ public class UserService {
         return user;
     }
 
-    public UserResponse findById(Long id) {
-        User user = findUserEntityById(id);
+    public UserResponse findById(String authenticatedEmail, Long id) {
+        User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
+        User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
         return toResponse(user);
     }
 
-    public List<UserResponse> findAll() {
-        return userRepository.findAll()
+    public List<UserResponse> findAll(String authenticatedEmail) {
+        User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
+
+        return userRepository.findAllBySystemClientId(authenticatedUser.getSystemClientId())
                 .stream()
                 .map(this::toResponse)
                 .toList();
     }
 
-    public UserResponse update(Long id, UserUpdateRequest request) {
-        User user = findUserEntityById(id);
-        UserResource resource = user.getResource().update(request.resource(), request.role(), request.permissions());
+
+    public UserResponse update(String authenticatedEmail, Long id, UserUpdateRequest request) {
+        User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
+        User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
+
+        if (!isAdmin(authenticatedUser)
+                && Objects.equals(authenticatedUser.getId(), user.getId())
+                && changesOwnPrivileges(user.getResource(), request.resource())) {
+            throw new AccessDeniedException("Não é permitido alterar o próprio papel ou permissões.");
+        }
+
 
         if (request.email() != null) {
             String normalizedEmail = request.email().trim().toLowerCase();
@@ -83,11 +97,16 @@ public class UserService {
         return toResponse(savedUser);
     }
 
-    public UserResponse updateStatus(Long id, UserStatusUpdateRequest request) {
-        User user = findUserEntityById(id);
+    public UserResponse updateStatus(String authenticatedEmail, Long id, UserStatusUpdateRequest request) {
+        User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
+        User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
 
         if (request.active() == null) {
             throw new IllegalArgumentException("O campo active é obrigatório.");
+        }
+
+        if (Objects.equals(authenticatedUser.getId(), user.getId()) && Boolean.FALSE.equals(request.active())) {
+            throw new AccessDeniedException("Não é permitido desativar o próprio usuário.");
         }
 
         user.setActive(request.active());
@@ -96,11 +115,26 @@ public class UserService {
         return toResponse(savedUser);
     }
 
-    private User findUserEntityById(Long id) {
-        return userRepository.findById(id)
-                .orElseThrow(() -> {
-                    return new EntityNotFoundException("Usuário não encontrado.");
-                });
+    private User findUserEntityByIdAndSystemClientId(Long id, Long systemClientId) {
+        return userRepository.findByIdAndSystemClientId(id, systemClientId)
+                .orElseThrow(() -> new EntityNotFoundException("Usuário não encontrado."));
+    }
+
+    private boolean changesOwnPrivileges(Map<String, Object> currentResource, Map<String, Object> requestedResource) {
+        if (requestedResource == null) {
+            return false;
+        }
+
+        return !Objects.equals(resourceValue(currentResource, "role"), requestedResource.get("role"))
+                || !Objects.equals(resourceValue(currentResource, "permissions"), requestedResource.get("permissions"));
+    }
+
+    private Object resourceValue(Map<String, Object> resource, String key) {
+        return resource == null ? null : resource.get(key);
+    }
+
+    private boolean isAdmin(User user) {
+        return Objects.equals("admin", resourceValue(user.getResource(), "role"));
     }
 
     private UserResponse toResponse(User user) {

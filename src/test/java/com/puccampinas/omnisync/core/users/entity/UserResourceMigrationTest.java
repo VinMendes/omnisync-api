@@ -12,101 +12,151 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class UserResourceMigrationTest {
 
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
-    void shouldBackfillLegacyUsersInRealPostgresWithoutNewTablesOrRepeatedPrivilegeChanges() throws Exception {
-        // Esta instância é local e descartável. Nenhuma variável de conexão da aplicação é lida.
+    void shouldMigrateLegacyUser38AndCreateOneExclusiveRolePerUser() throws Exception {
         try (EmbeddedPostgres postgres = EmbeddedPostgres.builder()
                 .setServerConfig("listen_addresses", "127.0.0.1").start()) {
             var dataSource = postgres.getPostgresDatabase();
-            Flyway.configure().dataSource(dataSource).target("6").load().migrate();
+            Flyway.configure().dataSource(dataSource).target("7").load().migrate();
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-            Long firstCompany = company(jdbc, "Empresa A");
-            Long secondCompany = company(jdbc, "Empresa B");
-            Long thirdCompany = company(jdbc, "Empresa C");
 
-            Long first = user(jdbc, firstCompany, null, 2020);
-            Long second = user(jdbc, firstCompany, "{\"cpf\":\"preserve-me\"}", 2021);
-            Long legacyEditor = user(jdbc, firstCompany,
-                    "{\"role\":\"editor\",\"permissions\":[\"Anúncios\",\"Gestão de estoque\"],\"theme\":\"dark\"}", 2022);
-            Long malformed = user(jdbc, firstCompany,
-                    "{\"role\":\"superuser\",\"permissions\":[\"USER_MANAGE\"]}", 2022);
-            Long emptyPermissions = user(jdbc, firstCompany, "{\"role\":\"ADMIN\",\"permissions\":[]}", 2022);
-            Long badPermissions = user(jdbc, firstCompany, "{\"role\":\"MANAGER\",\"permissions\":{}}", 2022);
-            Long mixedPermissions = user(jdbc, firstCompany,
-                    "{\"role\":\"VIEWER\",\"permissions\":[\"PRODUCT_READ\",42,null,\"ALL_POWERS\"]}", 2022);
-            Long invalidRoot = user(jdbc, secondCompany, "[\"preserve-legacy\"]", 2020);
-            Long nullJson = user(jdbc, secondCompany, "null", 2020);
-            Long newerInsertedFirst = user(jdbc, thirdCompany, "{}", 2022);
-            Long olderInsertedLater = user(jdbc, thirdCompany, "{}", 2019);
-            Map<Role, Long> defaultUsers = new HashMap<>();
-            for (Role role : Role.values()) {
-                defaultUsers.put(role, user(jdbc, firstCompany, json.writeValueAsString(Map.of("role", role.name())), 2023));
-            }
+            company(jdbc, 25L, "Empresa A");
+            company(jdbc, 26L, "Empresa B");
+
+            // Mesmo formato do registro legado informado, porém com PII e hash deliberadamente sanitizados.
+            legacyUser(jdbc, 38L, 25L, "migration-user-38@example.invalid",
+                    "{\"cpf\":\"00000000000\",\"role\":\"admin\",\"permissions\":["
+                            + "\"Somente leitura\",\"Acesso total\",\"Faturamento\",\"Marketplaces\","
+                            + "\"Atividade\",\"Vendas\",\"Gestão de estoque\",\"Gestão de usuários\",\"Anúncios\"]}",
+                    2026);
+            legacyUser(jdbc, 39L, 25L, "seller-a@example.invalid",
+                    "{\"role\":\"editor\",\"permissions\":[\"Anúncios\",\"Vendas\"]}", 2026);
+            legacyUser(jdbc, 40L, 25L, "seller-b@example.invalid",
+                    "{\"role\":\"seller\",\"permissions\":[\"Anúncios\",\"Vendas\"]}", 2026);
+            legacyUser(jdbc, 41L, 26L, "viewer-b@example.invalid",
+                    "{\"role\":\"viewer\"}", 2026);
 
             Flyway flyway = Flyway.configure().dataSource(dataSource).load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
 
-            assertThat(resource(jdbc, first).role()).isEqualTo(Role.ADMIN);
-            assertThat(resource(jdbc, second).role()).isEqualTo(Role.VIEWER);
-            assertThat(resource(jdbc, second).attributes()).containsEntry("cpf", "preserve-me");
-            assertThat(resource(jdbc, legacyEditor).role()).isEqualTo(Role.SELLER);
-            assertThat(resource(jdbc, legacyEditor).permissions()).containsExactlyInAnyOrder(
-                    Permission.PRODUCT_READ, Permission.PRODUCT_WRITE, Permission.LISTING_PUBLISH);
-            assertThat(resource(jdbc, legacyEditor).attributes()).containsEntry("theme", "dark");
-            assertThat(resource(jdbc, malformed).role()).isEqualTo(Role.VIEWER);
-            assertThat(resource(jdbc, malformed).permissions()).isEqualTo(Role.VIEWER.defaultPermissions());
-            assertThat(resource(jdbc, emptyPermissions).permissions()).isEmpty();
-            assertThat(resource(jdbc, badPermissions).permissions()).isEmpty();
-            assertThat(resource(jdbc, mixedPermissions).permissions()).containsExactly(Permission.PRODUCT_READ);
-            assertThat(resource(jdbc, invalidRoot).role()).isEqualTo(Role.ADMIN);
-            assertThat(resource(jdbc, invalidRoot).attributes()).containsKey("_legacy_resource");
-            assertThat(resource(jdbc, nullJson).role()).isEqualTo(Role.VIEWER);
-            assertThat(resource(jdbc, newerInsertedFirst).role()).isEqualTo(Role.VIEWER);
-            assertThat(resource(jdbc, olderInsertedLater).role()).isEqualTo(Role.ADMIN);
-            for (var entry : defaultUsers.entrySet()) {
-                assertThat(resource(jdbc, entry.getValue()).role()).isEqualTo(entry.getKey());
-                assertThat(resource(jdbc, entry.getValue()).permissions()).isEqualTo(entry.getKey().defaultPermissions());
-            }
+            assertThat(roleOf(jdbc, 38L)).isEqualTo(Role.ADMIN);
+            assertThat(permissionsOf(jdbc, 38L)).containsExactlyInAnyOrder(Permission.values());
+            assertThat(userResource(jdbc, 38L).attributes())
+                    .containsExactlyEntriesOf(Map.of("cpf", "00000000000"));
 
-            String verification = new ClassPathResource("db/verification/verify_user_resource_permissions.sql")
+            assertThat(roleOf(jdbc, 39L)).isEqualTo(Role.SELLER);
+            assertThat(permissionsOf(jdbc, 39L)).containsExactlyInAnyOrder(
+                    Permission.PRODUCT_READ, Permission.LISTING_PUBLISH,
+                    Permission.SALE_READ, Permission.SALE_WRITE);
+            assertThat(roleOf(jdbc, 40L)).isEqualTo(Role.SELLER);
+            assertThat(permissionsOf(jdbc, 40L)).containsExactlyInAnyOrder(
+                    Permission.PRODUCT_READ, Permission.LISTING_PUBLISH,
+                    Permission.SALE_READ, Permission.SALE_WRITE);
+            assertThat(roleIdOf(jdbc, 39L)).isNotEqualTo(roleIdOf(jdbc, 40L));
+            assertThat(jdbc.queryForObject(
+                    "SELECT count(*) FROM roles WHERE system_client_id = 25 AND name = 'SELLER'",
+                    Integer.class)).isEqualTo(2);
+
+            jdbc.update("UPDATE roles SET resource = jsonb_set(resource, '{permissions}', ?::jsonb) WHERE id = ?",
+                    "[\"PRODUCT_READ\",\"PRODUCT_WRITE\",\"LISTING_PUBLISH\",\"SALE_READ\",\"SALE_WRITE\"]",
+                    roleIdOf(jdbc, 40L));
+            assertThat(permissionsOf(jdbc, 39L)).doesNotContain(Permission.PRODUCT_WRITE);
+            assertThat(permissionsOf(jdbc, 40L)).contains(Permission.PRODUCT_WRITE);
+
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM roles", Integer.class)).isEqualTo(4);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM user_roles", Integer.class)).isEqualTo(4);
+            String verification = new ClassPathResource("db/verification/verify_relational_user_roles.sql")
                     .getContentAsString(StandardCharsets.UTF_8);
             assertThat(jdbc.queryForList(verification)).isEmpty();
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' "
-                    + "AND table_name IN ('permissions', 'role_permissions')", Integer.class)).isZero();
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM user_roles", Integer.class)).isZero();
 
-            // Atribuições posteriores não são revertidas quando a aplicação inicia novamente.
-            jdbc.update("UPDATE users SET resource = ?::jsonb WHERE id = ?",
-                    json.writeValueAsString(UserResource.defaults()), first);
+            Long tenantBViewer = roleIdOf(jdbc, 41L);
+            assertThatThrownBy(() -> jdbc.update("UPDATE user_roles SET role_id = ? WHERE user_id = 38", tenantBViewer))
+                    .hasStackTraceContaining("mesma empresa");
+
+            Long tenantAAdmin = roleIdOf(jdbc, 38L);
+            assertThatThrownBy(() -> jdbc.update("UPDATE user_roles SET role_id = ? WHERE user_id = 39", tenantAAdmin))
+                    .hasStackTraceContaining("uq_user_roles_role");
+
+            Long futureCompany = jdbc.queryForObject(
+                    "INSERT INTO system_client(name, document) VALUES ('Empresa futura', 'future') RETURNING id",
+                    Long.class);
+            assertThat(jdbc.queryForObject(
+                    "SELECT count(*) FROM roles WHERE system_client_id = ?", Integer.class, futureCompany)).isZero();
             assertThat(flyway.migrate().migrationsExecuted).isZero();
-            assertThat(resource(jdbc, first).role()).isEqualTo(Role.VIEWER);
-            assertThat(jdbc.queryForList(verification)).isEmpty();
         }
     }
 
-    private Long company(JdbcTemplate jdbc, String name) {
-        return jdbc.queryForObject("INSERT INTO system_client(name, document) VALUES (?, ?) RETURNING id",
-                Long.class, name, name);
+    @Test
+    void shouldConvertSharedTenantRoleIntoExclusiveUserRoles() throws Exception {
+        try (EmbeddedPostgres postgres = EmbeddedPostgres.builder()
+                .setServerConfig("listen_addresses", "127.0.0.1").start()) {
+            var dataSource = postgres.getPostgresDatabase();
+            Flyway.configure().dataSource(dataSource).target("7").load().migrate();
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            company(jdbc, 50L, "Empresa de migração");
+            legacyUser(jdbc, 51L, 50L, "seller-one@example.invalid",
+                    "{\"role\":\"SELLER\",\"permissions\":[\"SALE_READ\"]}", 2025);
+            legacyUser(jdbc, 52L, 50L, "seller-two@example.invalid",
+                    "{\"role\":\"SELLER\",\"permissions\":[\"SALE_READ\"]}", 2026);
+
+            assertThat(Flyway.configure().dataSource(dataSource).target("8").load()
+                    .migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(roleIdOf(jdbc, 51L)).isEqualTo(roleIdOf(jdbc, 52L));
+            jdbc.update("UPDATE users SET resource = ?::jsonb WHERE id = 52",
+                    "{\"role\":\"editor\",\"permissions\":[\"SALE_READ\",\"SALE_WRITE\"],\"theme\":\"dark\"}");
+
+            assertThat(Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted).isEqualTo(2);
+            assertThat(roleOf(jdbc, 51L)).isEqualTo(Role.SELLER);
+            assertThat(roleOf(jdbc, 52L)).isEqualTo(Role.SELLER);
+            assertThat(roleIdOf(jdbc, 51L)).isNotEqualTo(roleIdOf(jdbc, 52L));
+            assertThat(permissionsOf(jdbc, 51L)).containsExactly(Permission.SALE_READ);
+            assertThat(permissionsOf(jdbc, 52L)).containsExactlyInAnyOrder(
+                    Permission.SALE_READ, Permission.SALE_WRITE);
+            assertThat(userResource(jdbc, 52L).attributes())
+                    .containsExactlyEntriesOf(Map.of("theme", "dark"));
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM roles", Integer.class)).isEqualTo(2);
+        }
     }
 
-    private Long user(JdbcTemplate jdbc, Long company, String resource, int year) {
-        return jdbc.queryForObject("INSERT INTO users(system_client_id, name, email, password_hash, resource, created_at) "
-                        + "VALUES (?, 'Teste de migração', ?, 'not-a-real-password-hash', ?::jsonb, ?) RETURNING id",
-                Long.class, company, java.util.UUID.randomUUID() + "@example.invalid", resource,
-                Timestamp.valueOf(LocalDateTime.of(year, 1, 1, 0, 0)));
+    private void company(JdbcTemplate jdbc, Long id, String name) {
+        jdbc.update("INSERT INTO system_client(id, name, document) VALUES (?, ?, ?)", id, name, "tenant-" + id);
     }
 
-    private UserResource resource(JdbcTemplate jdbc, Long id) throws Exception {
-        return json.readValue(jdbc.queryForObject("SELECT resource::text FROM users WHERE id = ?", String.class, id),
-                UserResource.class);
+    private void legacyUser(JdbcTemplate jdbc, Long id, Long companyId, String email, String resource, int year) {
+        jdbc.update("INSERT INTO users(id, system_client_id, name, email, password_hash, resource, created_at) "
+                        + "VALUES (?, ?, 'Usuário sanitizado', ?, 'not-a-real-password-hash', ?::jsonb, ?)",
+                id, companyId, email, resource, Timestamp.valueOf(LocalDateTime.of(year, 1, 1, 0, 0)));
+    }
+
+    private Role roleOf(JdbcTemplate jdbc, Long userId) {
+        return Role.valueOf(jdbc.queryForObject(
+                "SELECT role.name FROM roles role JOIN user_roles link ON link.role_id = role.id WHERE link.user_id = ?",
+                String.class, userId));
+    }
+
+    private Long roleIdOf(JdbcTemplate jdbc, Long userId) {
+        return jdbc.queryForObject("SELECT role_id FROM user_roles WHERE user_id = ?", Long.class, userId);
+    }
+
+    private List<Permission> permissionsOf(JdbcTemplate jdbc, Long userId) throws Exception {
+        String stored = jdbc.queryForObject(
+                "SELECT role.resource::text FROM roles role JOIN user_roles link ON link.role_id = role.id WHERE link.user_id = ?",
+                String.class, userId);
+        return json.readValue(stored, RoleResource.class).permissions().stream().toList();
+    }
+
+    private UserResource userResource(JdbcTemplate jdbc, Long userId) throws Exception {
+        return json.readValue(jdbc.queryForObject(
+                "SELECT resource::text FROM users WHERE id = ?", String.class, userId), UserResource.class);
     }
 }

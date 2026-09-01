@@ -11,8 +11,12 @@ import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetEmailService;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetToken;
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenRepository;
+import com.puccampinas.omnisync.core.users.entity.RoleResource;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.UserAccess;
 import com.puccampinas.omnisync.core.users.entity.UserResource;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
+import com.puccampinas.omnisync.core.users.repository.TenantRoleRepository;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +55,7 @@ public class AuthService {
      * Repositório responsável pelo acesso à tabela de usuários.
      */
     private final UserRepository userRepository;
+    private final TenantRoleRepository tenantRoleRepository;
 
     /**
      * Componente de segurança usado para gerar e validar hash de senha.
@@ -92,6 +97,7 @@ public class AuthService {
      * @param passwordResetEmailService serviço de envio de recuperação de senha
      */
     public AuthService(UserRepository userRepository,
+                       TenantRoleRepository tenantRoleRepository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
                        PasswordResetTokenRepository passwordResetTokenRepository,
@@ -100,6 +106,7 @@ public class AuthService {
                        AuthenticationManager authenticationManager,
                        CustomUserDetailsService userDetailsService) {
         this.userRepository = userRepository;
+        this.tenantRoleRepository = tenantRoleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
@@ -116,13 +123,21 @@ public class AuthService {
      * @return usuário salvo no banco
      * @throws RuntimeException se já existir usuário com o email informado
      */
+    @Transactional
     public User register(RegisterRequest req) {
-        UserResource resource = UserResource.create(req.resource(), req.role(), req.permissions());
+        UserAccess access = UserAccess.forCreate(req.resource(), req.role(), req.permissions());
         String normalizedEmail = normalizeEmail(req.email());
 
         if (userRepository.existsByEmail(normalizedEmail)) {
             throw new RuntimeException("Já existe usuário com esse email");
         }
+
+        TenantRole tenantRole = new TenantRole();
+        tenantRole.setSystemClientId(req.systemClientId());
+        tenantRole.setName(access.role());
+        tenantRole.setResource(RoleResource.of(access.effectivePermissions(null)));
+        tenantRole = tenantRoleRepository.save(tenantRole);
+        UserResource resource = UserResource.create(req.resource());
 
         User user = new User();
         user.setSystemClientId(req.systemClientId());
@@ -130,8 +145,8 @@ public class AuthService {
         user.setEmail(normalizedEmail);
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setActive(true);
-
         user.setResource(resource);
+        user.setTenantRole(tenantRole);
 
         return userRepository.save(user);
     }

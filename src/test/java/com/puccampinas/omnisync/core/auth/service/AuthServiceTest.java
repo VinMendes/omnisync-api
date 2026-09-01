@@ -8,7 +8,10 @@ import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetEmailServic
 import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenRepository;
 import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.enums.Role;
+import com.puccampinas.omnisync.core.users.repository.TenantRoleRepository;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
@@ -40,6 +43,8 @@ class AuthServiceTest {
     @Mock
     private UserRepository userRepository;
     @Mock
+    private TenantRoleRepository tenantRoleRepository;
+    @Mock
     private PasswordEncoder passwordEncoder;
     @Mock
     private JwtService jwtService;
@@ -59,7 +64,7 @@ class AuthServiceTest {
     @BeforeEach
     void setup() {
         authService = new AuthService(
-                userRepository, passwordEncoder, jwtService, passwordResetTokenRepository,
+                userRepository, tenantRoleRepository, passwordEncoder, jwtService, passwordResetTokenRepository,
                 passwordResetEmailService, "https://frontend.example/reset-password",
                 authenticationManager, userDetailsService
         );
@@ -71,6 +76,8 @@ class AuthServiceTest {
                 1L, "Vinicius", "  VINI@EMAIL.COM  ", "123456", Map.of("cpf", "test")
         );
         when(userRepository.existsByEmail("vini@email.com")).thenReturn(false);
+        when(tenantRoleRepository.save(any(TenantRole.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         when(passwordEncoder.encode("123456")).thenReturn("hashed-password");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -81,6 +88,10 @@ class AuthServiceTest {
         assertThat(savedUser.getPasswordHash()).isEqualTo("hashed-password");
         assertThat(savedUser.getActive()).isTrue();
         assertThat(savedUser.getResource().attributes()).containsEntry("cpf", "test");
+        assertThat(savedUser.getTenantRole().getName()).isEqualTo(Role.VIEWER);
+        assertThat(savedUser.getTenantRole().getSystemClientId()).isEqualTo(1L);
+        assertThat(savedUser.getTenantRole().getPermissions()).isEqualTo(Role.VIEWER.defaultPermissions());
+        verify(tenantRoleRepository).save(savedUser.getTenantRole());
         verify(userRepository).save(any(User.class));
         verifyNoInteractions(authenticationManager);
     }
@@ -219,4 +230,5 @@ class AuthServiceTest {
                 1L, 10L, "Usuário de teste", "user@example.com", null, true, true, List.of()
         );
     }
+
 }

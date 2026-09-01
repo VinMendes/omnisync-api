@@ -27,6 +27,14 @@ public class User {
     @Column(name = "resource", columnDefinition = "jsonb")
     private UserResource resource = UserResource.defaults();
 
+    @OneToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinTable(
+            name = "user_roles",
+            joinColumns = @JoinColumn(name = "user_id", nullable = false),
+            inverseJoinColumns = @JoinColumn(name = "role_id", nullable = false)
+    )
+    private TenantRole tenantRole;
+
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
@@ -87,6 +95,14 @@ public class User {
 
     public void setResource(UserResource resource) {
         this.resource = resource;
+    }
+
+    public TenantRole getTenantRole() {
+        return tenantRole;
+    }
+
+    public void setTenantRole(TenantRole tenantRole) {
+        this.tenantRole = tenantRole;
     }
 
     public String getPasswordHash() {

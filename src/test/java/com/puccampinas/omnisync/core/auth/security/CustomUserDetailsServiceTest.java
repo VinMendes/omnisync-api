@@ -1,7 +1,8 @@
 package com.puccampinas.omnisync.core.auth.security;
 
 import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
-import com.puccampinas.omnisync.core.users.entity.UserResource;
+import com.puccampinas.omnisync.core.users.entity.RoleResource;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
 import com.puccampinas.omnisync.core.users.enums.Permission;
 import com.puccampinas.omnisync.core.users.enums.Role;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
@@ -16,7 +17,6 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -47,6 +47,7 @@ class CustomUserDetailsServiceTest {
         user.setEmail("user@example.com");
         user.setPasswordHash("hash");
         user.setActive(true);
+        user.setTenantRole(role(Role.VIEWER, Role.VIEWER.defaultPermissions()));
         client = new SystemClient();
         client.setId(10L);
         client.setActive(true);
@@ -70,11 +71,11 @@ class CustomUserDetailsServiceTest {
     @Test
     void shouldNeverGrantUnknownAuthoritiesFromMalformedLegacyResource() {
         stubUserAndClient();
-        user.setResource(UserResource.fromStoredJson(Map.of("role", "superuser",
-                "permissions", List.of("USER_MANAGE", "ALL_POWERS"))));
+        user.setTenantRole(role(Role.VIEWER, RoleResource.fromStoredJson(Map.of(
+                "permissions", java.util.List.of("PRODUCT_READ", "ALL_POWERS"))).permissions()));
 
         assertThat(service.loadUserByUsername("user@example.com").getAuthorities()).extracting("authority")
-                .containsExactly("PRODUCT_READ", "ROLE_VIEWER", "SALE_READ");
+                .containsExactly("PRODUCT_READ", "ROLE_VIEWER");
     }
 
     @Test
@@ -132,7 +133,7 @@ class CustomUserDetailsServiceTest {
     @Test
     void shouldLoadPersistedRoleAndPermissionAuthorities() {
         stubUserAndClient();
-        user.setResource(new UserResource(Role.ADMIN, Set.of(Permission.PRODUCT_READ, Permission.USER_MANAGE), Map.of()));
+        user.setTenantRole(role(Role.ADMIN, Set.of(Permission.PRODUCT_READ, Permission.USER_MANAGE)));
 
         assertThat(service.loadUserByUsername("user@example.com").getAuthorities()).extracting("authority")
                 .containsExactly("PRODUCT_READ", "ROLE_ADMIN", "USER_MANAGE");
@@ -141,10 +142,10 @@ class CustomUserDetailsServiceTest {
     @Test
     void shouldReloadPermissionsWithoutMutatingAnExistingPrincipal() {
         stubUserAndClient();
-        user.setResource(new UserResource(Role.VIEWER, Set.of(Permission.PRODUCT_READ), Map.of()));
+        user.setTenantRole(role(Role.VIEWER, Set.of(Permission.PRODUCT_READ)));
         OmniUserPrincipal first = service.loadActiveUserByUsername("user@example.com");
 
-        user.setResource(new UserResource(Role.VIEWER, Set.of(), Map.of()));
+        user.setTenantRole(role(Role.VIEWER, Set.of()));
         OmniUserPrincipal current = service.loadActiveUserByUsername("user@example.com");
 
         assertThat(first.getAuthorities()).extracting("authority").containsExactly("PRODUCT_READ", "ROLE_VIEWER");
@@ -154,5 +155,13 @@ class CustomUserDetailsServiceTest {
     private void stubUserAndClient() {
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
         when(systemClientRepository.findById(10L)).thenReturn(Optional.of(client));
+    }
+
+    private TenantRole role(Role name, Set<Permission> permissions) {
+        TenantRole role = new TenantRole();
+        role.setSystemClientId(10L);
+        role.setName(name);
+        role.setResource(RoleResource.of(permissions));
+        return role;
     }
 }

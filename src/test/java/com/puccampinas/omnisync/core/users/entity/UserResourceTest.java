@@ -8,8 +8,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,129 +32,146 @@ class UserResourceTest {
         assertThat(Role.SELLER.defaultPermissions())
                 .containsExactlyInAnyOrder(PRODUCT_READ, LISTING_PUBLISH, SALE_READ, SALE_WRITE);
         assertThat(Role.VIEWER.defaultPermissions()).containsExactlyInAnyOrder(PRODUCT_READ, SALE_READ);
-        assertThatThrownBy(() -> Role.ROLE_DEFAULT_PERMISSIONS.clear()).isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> Role.VIEWER.defaultPermissions().add(USER_MANAGE)).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> Role.ROLE_DEFAULT_PERMISSIONS.clear())
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @ParameterizedTest
     @EnumSource(Role.class)
-    void shouldApplyDefaultsWhenCreatingWithoutPermissions(Role role) {
-        assertThat(UserResource.create(null, role.name(), null).permissions()).isEqualTo(role.defaultPermissions());
-        assertThat(UserResource.create(Map.of("role", role.name().toLowerCase()), null, null).permissions())
-                .isEqualTo(role.defaultPermissions());
+    void shouldResolveRoleAndItsDefaultPermissionsSeparatelyFromUserMetadata(Role role) {
+        UserAccess access = UserAccess.forCreate(Map.of("role", role.legacyName()), null, null);
+
+        assertThat(access.role()).isEqualTo(role);
+        assertThat(access.permissionsProvided()).isFalse();
+        assertThat(access.effectivePermissions(null)).isEqualTo(role.defaultPermissions());
+        assertThat(UserResource.create(Map.of("role", role.name(), "cpf", "test")).attributes())
+                .containsExactlyEntriesOf(Map.of("cpf", "test"));
     }
 
     @Test
-    void shouldDefaultNewAccountsToViewerAndPreserveExplicitEmptyPermissions() {
-        assertThat(UserResource.create(null, null, null).role()).isEqualTo(Role.VIEWER);
-        assertThat(UserResource.create(null, "ADMIN", List.of()).permissions()).isEmpty();
-    }
+    void shouldAcceptLegacyLabelsButRejectUnknownOrConflictingAccessInput() {
+        UserAccess access = UserAccess.forCreate(
+                Map.of("role", "editor", "permissions", List.of("Anúncios", "Vendas")), null, null);
+        assertThat(access.role()).isEqualTo(Role.SELLER);
+        assertThat(access.permissions()).containsExactlyInAnyOrder(
+                PRODUCT_READ, LISTING_PUBLISH, SALE_READ, SALE_WRITE);
 
-    @Test
-    void shouldRejectUnknownRolesAndPermissionsInNewInput() {
-        assertThatThrownBy(() -> UserResource.create(null, "superuser", null))
+        assertThatThrownBy(() -> UserAccess.forCreate(null, "superuser", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Role desconhecida: superuser");
-        assertThatThrownBy(() -> UserResource.create(Map.of("role", "superuser"), null, null))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Role desconhecida: superuser");
-        assertThatThrownBy(() -> UserResource.create(null, "VIEWER", List.of("ROOT_ACCESS")))
+        assertThatThrownBy(() -> UserAccess.forCreate(null, "VIEWER", List.of("ROOT_ACCESS")))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Permissão desconhecida: ROOT_ACCESS");
-        assertThatThrownBy(() -> UserResource.create(Map.of("permissions", "PRODUCT_READ"), null, null))
+        assertThatThrownBy(() -> UserAccess.forCreate(Map.of("permissions", "PRODUCT_READ"), null, null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("lista de strings");
-        assertThatThrownBy(() -> UserResource.create(Map.of("permissions", List.of(7)), null, null))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("string válida");
-    }
-
-    @Test
-    void shouldRejectConflictingTopLevelAndNestedFields() {
-        assertThatThrownBy(() -> UserResource.create(Map.of("role", "admin"), "VIEWER", null))
+        assertThatThrownBy(() -> UserAccess.forCreate(Map.of("role", "ADMIN"), "VIEWER", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("mesmo papel");
-        assertThatThrownBy(() -> UserResource.create(Map.of("permissions", List.of("SALE_READ")),
-                "VIEWER", List.of("PRODUCT_READ"))).isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("mesmas permissões");
+        assertThatThrownBy(() -> UserAccess.forCreate(Map.of("permissions", List.of("SALE_READ")),
+                "VIEWER", List.of("PRODUCT_READ")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("mesmas permissões");
     }
 
     @Test
-    void shouldNormalizeLegacyLabelsIntoTypedPermissions() {
-        UserResource resource = UserResource.create(Map.of("role", "manager",
-                "permissions", List.of("Gestão de estoque", "Anúncios", "Vendas"), "cpf", "test"), null, null);
-        assertThat(resource.role()).isEqualTo(Role.MANAGER);
-        assertThat(resource.permissions()).isEqualTo(Role.MANAGER.defaultPermissions());
-        assertThat(resource.attributes()).containsExactlyEntriesOf(Map.of("cpf", "test"));
-        assertThat(resource.toStoredJson()).containsEntry("role", "MANAGER");
-        assertThat(resource.permissionNames()).doesNotContain("Anúncios", "Vendas");
+    void shouldUseExplicitPermissionsOnlyForTheRequestedUser() {
+        UserAccess requested = UserAccess.forCreate(null, "SELLER", List.of("SALE_READ"));
+        TenantRole current = tenantRole(10L, Role.SELLER, Role.SELLER.defaultPermissions());
+
+        assertThat(requested.effectivePermissions(current)).containsExactly(SALE_READ);
+        assertThat(current.getPermissions()).isEqualTo(Role.SELLER.defaultPermissions());
     }
 
     @Test
-    void shouldAcceptEditorOnlyAsALegacyAliasForCanonicalSeller() {
-        UserResource resource = UserResource.create(Map.of("role", "editor"), null, null);
-        assertThat(resource.role()).isEqualTo(Role.SELLER);
-        assertThat(resource.toStoredJson()).containsEntry("role", "SELLER");
-        assertThat(resource.toLegacyJson()).containsEntry("role", "editor");
+    void shouldPreservePermissionsWhenOmittedAndRoleIsUnchanged() {
+        TenantRole current = tenantRole(10L, Role.SELLER, Set.of(SALE_READ));
+        UserAccess unchanged = UserAccess.forUpdate(null, null, null, Role.SELLER);
+        UserAccess changedRole = UserAccess.forUpdate(null, "MANAGER", null, Role.SELLER);
+
+        assertThat(unchanged.effectivePermissions(current)).containsExactly(SALE_READ);
+        assertThat(changedRole.effectivePermissions(current)).isEqualTo(Role.MANAGER.defaultPermissions());
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "{}", "[]", "\"legacy\"", "17",
-            "{\"permissions\":[\"USER_MANAGE\"]}",
-            "{\"role\":\"superuser\",\"permissions\":[\"USER_MANAGE\"]}",
-            "{\"role\":17,\"permissions\":[\"USER_MANAGE\"]}"
-    })
-    void shouldReadMalformedLegacyDataWithBothJacksonVersionsWithoutGrantingAdmin(String stored) throws Exception {
-        for (UserResource parsed : List.of(jackson2.readValue(stored, UserResource.class), jackson3.readValue(stored, UserResource.class))) {
-            assertThat(parsed.role()).isEqualTo(Role.VIEWER);
-            assertThat(parsed.permissions()).containsExactlyInAnyOrder(PRODUCT_READ, SALE_READ);
+    @ValueSource(strings = {"null", "[]", "\"legacy\"", "17",
+            "{\"role\":\"superuser\",\"permissions\":[\"USER_MANAGE\"],\"cpf\":\"test\"}"})
+    void shouldReadMalformedLegacyUserResourceWithoutKeepingAccessFields(String stored) throws Exception {
+        UserResource[] parsedResources = {
+                jackson2.readValue(stored, UserResource.class),
+                jackson3.readValue(stored, UserResource.class)
+        };
+        for (UserResource parsed : parsedResources) {
+            User user = new User();
+            user.setResource(parsed);
+            assertThat(user.getResource().attributes()).doesNotContainKeys("role", "permissions");
         }
     }
 
     @Test
-    void shouldNotGrantUnknownOrMalformedPermissionEntriesFromStorage() throws Exception {
-        String stored = "{\"role\":\"VIEWER\",\"permissions\":[\"PRODUCT_READ\",42,null,\"ALL_POWERS\"]}";
-        assertThat(jackson2.readValue(stored, UserResource.class).permissions()).containsExactly(PRODUCT_READ);
-        assertThat(jackson3.readValue(stored, UserResource.class).permissions()).containsExactly(PRODUCT_READ);
-        assertThat(jackson2.readValue("{\"role\":\"ADMIN\",\"permissions\":{}}", UserResource.class).permissions()).isEmpty();
-        User user = new User();
-        user.setResource(null);
-        assertThat(user.getResource()).isEqualTo(UserResource.defaults());
-    }
-
-    @Test
-    void shouldPreserveUnrelatedMetadataIncludingNullValuesThroughSerialization() throws Exception {
+    void shouldPersistOnlyUserCharacteristicsAndBuildLegacyApiProjection() throws Exception {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("cpf", "test");
         metadata.put("optional", null);
-        metadata.put("preferences", Map.of("theme", "dark"));
-        metadata.put("role", "superuser");
-        UserResource original = new UserResource(Role.MANAGER, null, metadata);
-        String persisted = jackson2.writeValueAsString(original);
-        assertThat(jackson2.readValue(persisted, UserResource.class)).isEqualTo(original);
-        assertThat(jackson3.readValue(jackson3.writeValueAsString(original), UserResource.class)).isEqualTo(original);
-        assertThat(persisted).contains("\"role\":\"MANAGER\"").doesNotContain("attributes", "superuser");
-        assertThat(original.attributes()).containsEntry("optional", null);
+        metadata.put("role", "admin");
+        metadata.put("permissions", List.of("Acesso total"));
+        UserResource resource = new UserResource(metadata);
+
+        String persisted = jackson2.writeValueAsString(resource);
+        assertThat(persisted).contains("\"cpf\":\"test\"")
+                .doesNotContain("role", "permissions", "attributes");
+        assertThat(jackson2.readValue(persisted, UserResource.class)).isEqualTo(resource);
+        assertThat(jackson3.readValue(jackson3.writeValueAsString(resource), UserResource.class)).isEqualTo(resource);
+
+        assertThat(resource.toLegacyJson(Role.SELLER, Role.SELLER.defaultPermissions()))
+                .containsEntry("cpf", "test")
+                .containsEntry("role", "editor");
     }
 
     @Test
-    void shouldPreserveCustomPermissionsOnMetadataUpdatesAndResetDefaultsOnRoleChange() {
-        UserResource current = new UserResource(Role.ADMIN, Set.of(PRODUCT_READ), Map.of("cpf", "test"));
-        UserResource metadataOnly = current.update(Map.of("theme", "dark"), null, null);
-        assertThat(metadataOnly.role()).isEqualTo(Role.ADMIN);
-        assertThat(metadataOnly.permissions()).containsExactly(PRODUCT_READ);
-        assertThat(metadataOnly.attributes()).containsEntry("cpf", "test").containsEntry("theme", "dark");
-        assertThat(current.update(null, "MANAGER", null).permissions()).isEqualTo(Role.MANAGER.defaultPermissions());
+    void shouldDeserializeRoleResourceFailClosed() throws Exception {
+        RoleResource valid = jackson2.readValue(
+                "{\"permissions\":[\"PRODUCT_READ\",\"USER_MANAGE\"],\"label\":\"custom\"}",
+                RoleResource.class);
+        RoleResource malformed = jackson2.readValue(
+                "{\"permissions\":[\"PRODUCT_READ\",\"ALL_POWERS\",42]}", RoleResource.class);
+
+        assertThat(valid.permissions()).containsExactlyInAnyOrder(PRODUCT_READ, USER_MANAGE);
+        assertThat(valid.attributes()).containsEntry("label", "custom");
+        assertThat(malformed.permissions()).containsExactly(PRODUCT_READ);
     }
 
     @Test
-    void shouldRoundTripEveryPermissionSubsetThroughLegacyProjectionWithoutEscalation() {
+    void shouldRoundTripEveryPermissionSubsetThroughLegacyFrontendLabels() {
         Permission[] all = Permission.values();
-        for (Role role : Role.values()) {
-            for (int mask = 0; mask < (1 << all.length); mask++) {
-                Set<Permission> permissions = EnumSet.noneOf(Permission.class);
-                for (int i = 0; i < all.length; i++) {
-                    if ((mask & (1 << i)) != 0) permissions.add(all[i]);
+        for (int mask = 0; mask < (1 << all.length); mask++) {
+            Set<Permission> expected = EnumSet.noneOf(Permission.class);
+            for (int index = 0; index < all.length; index++) {
+                if ((mask & (1 << index)) != 0) {
+                    expected.add(all[index]);
                 }
-                UserResource original = new UserResource(role, permissions, Map.of("cpf", "test"));
-                UserResource restored = UserResource.create(original.toLegacyJson(), null, null);
-                assertThat(restored).as("role=%s, mask=%s", role, mask).isEqualTo(original);
             }
+            assertThat(Permission.parseSet(Permission.legacyNames(expected), true))
+                    .as("permission mask %s", mask)
+                    .isEqualTo(expected);
         }
+    }
+
+    @Test
+    void shouldExpandFullAccessIntoEveryLegacyFrontendCheckbox() {
+        assertThat(Permission.legacyNames(Role.ADMIN.defaultPermissions())).containsExactly(
+                "Acesso total",
+                "Gestão de usuários",
+                "Faturamento",
+                "Gestão de estoque",
+                "Anúncios",
+                "Vendas",
+                "Marketplaces",
+                "Atividade",
+                "Somente leitura"
+        );
+    }
+
+    private TenantRole tenantRole(Long systemClientId, Role role, Set<Permission> permissions) {
+        TenantRole tenantRole = new TenantRole();
+        tenantRole.setSystemClientId(systemClientId);
+        tenantRole.setName(role);
+        tenantRole.setResource(RoleResource.of(permissions));
+        return tenantRole;
     }
 }

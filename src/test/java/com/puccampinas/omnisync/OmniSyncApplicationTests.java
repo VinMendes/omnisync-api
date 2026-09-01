@@ -5,10 +5,13 @@ import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
+import com.puccampinas.omnisync.core.users.entity.RoleResource;
 import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.users.enums.Permission;
 import com.puccampinas.omnisync.core.users.enums.Role;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
+import com.puccampinas.omnisync.core.users.repository.TenantRoleRepository;
 import com.puccampinas.omnisync.support.EmbeddedPostgresTestConfig;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -27,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -43,6 +47,7 @@ class OmniSyncApplicationTests {
 
     @Autowired private MockMvc mvc;
     @Autowired private UserRepository users;
+    @Autowired private TenantRoleRepository tenantRoles;
     @Autowired private SystemClientRepository companies;
     @Autowired private EntityManager entityManager;
     @Autowired private JwtService jwtService;
@@ -65,11 +70,11 @@ class OmniSyncApplicationTests {
         entityManager.clear();
 
         User stored = users.findByEmail("typed@example.com").orElseThrow();
-        assertThat(stored.getResource().role()).isEqualTo(Role.MANAGER);
-        assertThat(stored.getResource().permissions()).isEqualTo(Role.MANAGER.defaultPermissions());
+        assertThat(stored.getTenantRole().getName()).isEqualTo(Role.MANAGER);
+        assertThat(stored.getTenantRole().getPermissions()).isEqualTo(Role.MANAGER.defaultPermissions());
         assertThat(stored.getResource().attributes()).containsEntry("cpf", "preserved");
         assertThat(entityManager.createNativeQuery("SELECT resource ->> 'role' FROM users WHERE id = ?1", String.class)
-                .setParameter(1, stored.getId()).getSingleResult()).isEqualTo("MANAGER");
+                .setParameter(1, stored.getId()).getSingleResult()).isNull();
 
         mvc.perform(get("/api/users/me").cookie(response.getCookie("ACCESS_TOKEN")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.role").value("MANAGER"))
@@ -88,11 +93,31 @@ class OmniSyncApplicationTests {
                 .andExpect(status().isOk()).andReturn().getResponse();
         entityManager.flush();
         entityManager.clear();
-        assertThat(users.findByEmail("legacy@example.com").orElseThrow().getResource().role()).isEqualTo(Role.SELLER);
+        assertThat(users.findByEmail("legacy@example.com").orElseThrow().getTenantRole().getName()).isEqualTo(Role.SELLER);
         mvc.perform(get("/api/users/me").cookie(response.getCookie("ACCESS_TOKEN")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.role").value("SELLER"))
                 .andExpect(jsonPath("$.resource.role").value("editor"))
-                .andExpect(jsonPath("$.permissions", containsInAnyOrder("PRODUCT_READ", "PRODUCT_WRITE", "LISTING_PUBLISH")));
+                .andExpect(jsonPath("$.permissions", containsInAnyOrder(
+                        "PRODUCT_READ", "PRODUCT_WRITE", "LISTING_PUBLISH")));
+    }
+
+    @Test
+    void shouldExposeEveryLegacyCheckboxForAFullAccessAdmin() throws Exception {
+        User admin = user(Role.ADMIN);
+
+        mvc.perform(get("/api/users/me").cookie(access(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resource.permissions", containsInAnyOrder(
+                        "Acesso total",
+                        "Gestão de usuários",
+                        "Faturamento",
+                        "Gestão de estoque",
+                        "Anúncios",
+                        "Vendas",
+                        "Marketplaces",
+                        "Atividade",
+                        "Somente leitura"
+                )));
     }
 
     @ParameterizedTest
@@ -127,18 +152,93 @@ class OmniSyncApplicationTests {
 
     @Test
     void shouldUpdateTypedPermissionsAndPreserveMetadata() throws Exception {
-        User user = user();
+        User user = user(Role.ADMIN);
         mvc.perform(put("/api/users/{id}", user.getId()).cookie(access(user)).contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(Map.of("role", "MANAGER", "permissions", List.of("SALE_READ"),
-                                "resource", Map.of("theme", "dark")))))
+                        .content(json.writeValueAsString(Map.of("resource", Map.of(
+                                "role", "manager", "permissions", List.of("Anúncios", "Vendas"),
+                                "theme", "dark")))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.role").value("MANAGER"))
-                .andExpect(jsonPath("$.permissions", containsInAnyOrder("SALE_READ")));
+                .andExpect(jsonPath("$.permissions", containsInAnyOrder(
+                        "PRODUCT_READ", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")));
         entityManager.flush();
         entityManager.clear();
-        UserResource stored = users.findById(user.getId()).orElseThrow().getResource();
-        assertThat(stored.role()).isEqualTo(Role.MANAGER);
-        assertThat(stored.permissions()).containsExactly(Permission.SALE_READ);
-        assertThat(stored.attributes()).containsEntry("cpf", "preserved").containsEntry("theme", "dark");
+        User stored = users.findById(user.getId()).orElseThrow();
+        assertThat(stored.getTenantRole().getName()).isEqualTo(Role.MANAGER);
+        assertThat(stored.getTenantRole().getPermissions()).containsExactlyInAnyOrder(
+                Permission.PRODUCT_READ, Permission.LISTING_PUBLISH,
+                Permission.SALE_READ, Permission.SALE_WRITE);
+        assertThat(stored.getResource().attributes())
+                .containsEntry("cpf", "preserved").containsEntry("theme", "dark");
+    }
+
+    @Test
+    void shouldApplyDifferentSellerPermissionsForUsersOfTheSameTenant() throws Exception {
+        Long companyId = company();
+
+        var registeredA = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("systemClientId", companyId, "name", "Vendedor A",
+                                "email", "seller-a@example.com", "password", "test-password", "resource",
+                                Map.of("role", "editor", "permissions", List.of("Anúncios", "Vendas"))))))
+                .andExpect(status().isOk()).andReturn().getResponse();
+        var registeredB = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("systemClientId", companyId, "name", "Vendedor B",
+                                "email", "seller-b@example.com", "password", "test-password", "resource",
+                                Map.of("role", "editor", "permissions",
+                                        List.of("Anúncios", "Vendas", "Gestão de estoque"))))))
+                .andExpect(status().isOk()).andReturn().getResponse();
+
+        mvc.perform(get("/api/users/me").cookie(registeredA.getCookie("ACCESS_TOKEN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.permissions", containsInAnyOrder(
+                        "PRODUCT_READ", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")));
+        mvc.perform(get("/api/users/me").cookie(registeredB.getCookie("ACCESS_TOKEN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.permissions", containsInAnyOrder(
+                        "PRODUCT_READ", "PRODUCT_WRITE", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")));
+
+        User storedA = users.findByEmail("seller-a@example.com").orElseThrow();
+        User storedB = users.findByEmail("seller-b@example.com").orElseThrow();
+        assertThat(storedA.getSystemClientId()).isEqualTo(storedB.getSystemClientId());
+        assertThat(storedA.getTenantRole().getName()).isEqualTo(Role.SELLER);
+        assertThat(storedB.getTenantRole().getName()).isEqualTo(Role.SELLER);
+        assertThat(storedA.getTenantRole().getId()).isNotEqualTo(storedB.getTenantRole().getId());
+        assertThat(storedA.getTenantRole().getPermissions()).doesNotContain(Permission.PRODUCT_WRITE);
+        assertThat(storedB.getTenantRole().getPermissions()).contains(Permission.PRODUCT_WRITE);
+        assertThat(storedA.getResource().attributes()).doesNotContainKeys("role", "permissions");
+        assertThat(storedB.getResource().attributes()).doesNotContainKeys("role", "permissions");
+    }
+
+    @Test
+    void putShouldUpdateOnlyTheTargetUsersRole() throws Exception {
+        Long companyId = company();
+        User admin = user(companyId, "admin@example.com", Role.ADMIN, Role.ADMIN.defaultPermissions());
+        User sellerA = user(companyId, "seller-a@example.com", Role.SELLER,
+                Set.of(Permission.PRODUCT_READ));
+        User sellerB = user(companyId, "seller-b@example.com", Role.SELLER,
+                Set.of(Permission.SALE_READ));
+        Long sellerARoleId = sellerA.getTenantRole().getId();
+        Long sellerBRoleId = sellerB.getTenantRole().getId();
+
+        mvc.perform(put("/api/users/{id}", sellerA.getId()).cookie(access(admin))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("resource", Map.of(
+                                "role", "editor", "permissions", List.of("Anúncios", "Vendas"))))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("SELLER"))
+                .andExpect(jsonPath("$.permissions", containsInAnyOrder(
+                        "PRODUCT_READ", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")));
+
+        entityManager.flush();
+        entityManager.clear();
+        User storedA = users.findById(sellerA.getId()).orElseThrow();
+        User storedB = users.findById(sellerB.getId()).orElseThrow();
+        assertThat(storedA.getTenantRole().getId()).isEqualTo(sellerARoleId);
+        assertThat(storedB.getTenantRole().getId()).isEqualTo(sellerBRoleId);
+        assertThat(storedA.getTenantRole().getPermissions()).containsExactlyInAnyOrder(
+                Permission.PRODUCT_READ, Permission.LISTING_PUBLISH,
+                Permission.SALE_READ, Permission.SALE_WRITE);
+        assertThat(storedB.getTenantRole().getPermissions()).containsExactly(Permission.SALE_READ);
+        assertThat(tenantRoles.findAllBySystemClientIdOrderByName(companyId)).hasSize(3);
     }
 
     private Long company() {
@@ -150,12 +250,26 @@ class OmniSyncApplicationTests {
     }
 
     private User user() {
+        return user(Role.VIEWER);
+    }
+
+    private User user(Role role) {
+        Long companyId = company();
+        return user(companyId, "account@example.com", role, role.defaultPermissions());
+    }
+
+    private User user(Long companyId, String email, Role role, Set<Permission> permissions) {
         User user = new User();
-        user.setSystemClientId(company());
+        user.setSystemClientId(companyId);
         user.setName("Usuário de teste");
-        user.setEmail("account@example.com");
+        user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode("test-password"));
-        user.setResource(UserResource.create(Map.of("cpf", "preserved"), "VIEWER", null));
+        user.setResource(UserResource.create(Map.of("cpf", "preserved")));
+        TenantRole tenantRole = new TenantRole();
+        tenantRole.setSystemClientId(companyId);
+        tenantRole.setName(role);
+        tenantRole.setResource(RoleResource.of(permissions));
+        user.setTenantRole(tenantRoles.saveAndFlush(tenantRole));
         return users.saveAndFlush(user);
     }
 

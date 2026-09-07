@@ -52,8 +52,9 @@ class UserResourceMigrationTest {
                 defaultUsers.put(role, user(jdbc, firstCompany, json.writeValueAsString(Map.of("role", role.name())), 2023));
             }
 
+            Flyway permissionMigration = Flyway.configure().dataSource(dataSource).target("7").load();
+            assertThat(permissionMigration.migrate().migrationsExecuted).isEqualTo(1);
             Flyway flyway = Flyway.configure().dataSource(dataSource).load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
 
             assertThat(resource(jdbc, first).role()).isEqualTo(Role.ADMIN);
             assertThat(resource(jdbc, second).role()).isEqualTo(Role.VIEWER);
@@ -83,6 +84,9 @@ class UserResourceMigrationTest {
             assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' "
                     + "AND table_name IN ('permissions', 'role_permissions')", Integer.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM user_roles", Integer.class)).isZero();
+
+            // Migrações posteriores (como os índices do dashboard) não alteram as permissões.
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
 
             // Atribuições posteriores não são revertidas quando a aplicação inicia novamente.
             jdbc.update("UPDATE users SET resource = ?::jsonb WHERE id = ?",

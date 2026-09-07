@@ -2,8 +2,13 @@ package com.puccampinas.omnisync.core.users.controller;
 
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
+import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.RoleResource;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
 import com.puccampinas.omnisync.core.users.entity.UserResource;
+import com.puccampinas.omnisync.core.users.enums.Role;
+import com.puccampinas.omnisync.core.users.repository.TenantRoleRepository;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import org.junit.jupiter.api.Test;
@@ -44,10 +49,16 @@ class UserTenantIsolationIntegrationTest {
     private UserRepository userRepository;
 
     @MockitoBean
+    private TenantRoleRepository tenantRoleRepository;
+
+    @MockitoBean
     private JwtService jwtService;
 
     @MockitoBean
     private AuthCookieService authCookieService;
+
+    @MockitoBean
+    private CustomUserDetailsService customUserDetailsService;
 
     @Test
     void listReturnsOnlyUsersFromAuthenticatedTenant() throws Exception {
@@ -112,10 +123,11 @@ class UserTenantIsolationIntegrationTest {
         mockMvc.perform(put("/api/users/1")
                         .principal(authentication())
                         .contentType("application/json")
-                        .content("{\"role\":\"MANAGER\",\"permissions\":[\"SALE_READ\",\"SALE_WRITE\"]}"))
+                        .content("{\"role\":\"MANAGER\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resource.role").value("manager"));
 
+        verify(tenantRoleRepository).save(adminA.getTenantRole());
         verify(userRepository).save(adminA);
     }
 
@@ -145,11 +157,17 @@ class UserTenantIsolationIntegrationTest {
         user.setEmail(email);
         user.setName(name);
         user.setActive(true);
-        user.setResource(UserResource.create(Map.of(
-                "role", role,
-                "permissions", List.of("Gestão de usuários")
-        ), null, null));
+        user.setResource(UserResource.defaults());
+        user.setTenantRole(role(systemClientId, Role.parse(role)));
         return user;
+    }
+
+    private TenantRole role(Long systemClientId, Role name) {
+        TenantRole role = new TenantRole();
+        role.setSystemClientId(systemClientId);
+        role.setName(name);
+        role.setResource(RoleResource.of(name.defaultPermissions()));
+        return role;
     }
 
     private UsernamePasswordAuthenticationToken authentication() {

@@ -12,6 +12,8 @@ import com.puccampinas.omnisync.core.auth.passwordreset.PasswordResetTokenReposi
 import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
+import com.puccampinas.omnisync.core.users.entity.RoleResource;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
 import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.users.enums.Permission;
 import com.puccampinas.omnisync.core.users.enums.Role;
@@ -19,6 +21,7 @@ import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import com.puccampinas.omnisync.core.users.controller.UserController;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.repository.TenantRoleRepository;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import com.puccampinas.omnisync.core.users.service.UserService;
 import io.jsonwebtoken.Jwts;
@@ -93,6 +96,8 @@ class AuthFlowIntegrationTest {
     @MockitoBean
     private SystemClientRepository clientRepository;
     @MockitoBean
+    private TenantRoleRepository tenantRoleRepository;
+    @MockitoBean
     private PasswordResetTokenRepository resetTokenRepository;
     @MockitoBean
     private PasswordResetEmailService resetEmailService;
@@ -109,12 +114,15 @@ class AuthFlowIntegrationTest {
         user.setEmail(EMAIL);
         user.setPasswordHash(passwordEncoder.encode(PASSWORD));
         user.setActive(true);
-        user.setResource(UserResource.create(Map.of("role", "admin"), null, null));
+        user.setResource(UserResource.defaults());
+        user.setTenantRole(role(Role.ADMIN, Role.ADMIN.defaultPermissions()));
         company = new SystemClient();
         company.setId(10L);
         company.setActive(true);
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         when(clientRepository.findById(10L)).thenReturn(Optional.of(company));
+        when(tenantRoleRepository.save(any(TenantRole.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -308,7 +316,7 @@ class AuthFlowIntegrationTest {
 
     @Test
     void shouldReloadRoleChangesWithTheSameAccessTokenWithoutChangingItsFormat() throws Exception {
-        user.setResource(new UserResource(Role.ADMIN, Set.of(Permission.USER_MANAGE), Map.of()));
+        user.setTenantRole(role(Role.ADMIN, Set.of(Permission.USER_MANAGE)));
         Cookie access = login(EMAIL, PASSWORD).andExpect(status().isOk()).andReturn().getResponse().getCookie("ACCESS_TOKEN");
 
         assertThat(jwtService.validateAndGetClaims(access.getValue()).keySet())
@@ -316,7 +324,7 @@ class AuthFlowIntegrationTest {
         mvc.perform(get("/test/auth-identity").cookie(access)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_ADMIN", "USER_MANAGE")));
 
-        user.setResource(new UserResource(Role.VIEWER, Set.of(Permission.PRODUCT_READ), Map.of()));
+        user.setTenantRole(role(Role.VIEWER, Set.of(Permission.PRODUCT_READ)));
         mvc.perform(get("/test/auth-identity").cookie(access)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_VIEWER", "PRODUCT_READ")));
     }
@@ -346,6 +354,14 @@ class AuthFlowIntegrationTest {
         assertThat(cookie.isHttpOnly()).isTrue();
         assertThat(cookie.getSecure()).isFalse();
         assertThat(cookie.getPath()).isEqualTo("/");
+    }
+
+    private TenantRole role(Role name, Set<Permission> permissions) {
+        TenantRole role = new TenantRole();
+        role.setSystemClientId(10L);
+        role.setName(name);
+        role.setResource(RoleResource.of(permissions));
+        return role;
     }
 
     @RestController

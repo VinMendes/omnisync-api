@@ -1,9 +1,9 @@
 package com.puccampinas.omnisync.core.auth.security;
 
-import com.puccampinas.omnisync.core.users.entity.UserResource;
 import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import org.springframework.security.authentication.AccountStatusUserDetailsChecker;
 import org.springframework.security.core.GrantedAuthority;
@@ -44,7 +44,6 @@ public class CustomUserDetailsService implements UserDetailsService {
         SystemClient client = systemClientRepository.findById(user.getSystemClientId())
                 .orElseThrow(() -> new UsernameNotFoundException("Empresa do usuário não encontrada."));
 
-        // UserResource é o contrato tipado persistido no JSONB; textos desconhecidos não viram authorities.
         return new OmniUserPrincipal(
                 user.getId(), user.getSystemClientId(), user.getName(), user.getEmail(),
                 user.getPasswordHash(), Boolean.TRUE.equals(user.getActive()), client.getActive(), authoritiesOf(user)
@@ -52,10 +51,13 @@ public class CustomUserDetailsService implements UserDetailsService {
     }
 
     private List<GrantedAuthority> authoritiesOf(User user) {
+        TenantRole tenantRole = user.getTenantRole();
+        if (tenantRole == null || tenantRole.getName() == null) {
+            throw new UsernameNotFoundException("Papel do usuário não encontrado.");
+        }
         Set<String> authorities = new TreeSet<>();
-        UserResource resource = user.getResource();
-        authorities.add("ROLE_" + resource.role().name());
-        resource.permissions().forEach(permission -> authorities.add(permission.name()));
+        authorities.add("ROLE_" + tenantRole.getName().name());
+        tenantRole.getPermissions().forEach(permission -> authorities.add(permission.name()));
         return authorities.stream().<GrantedAuthority>map(SimpleGrantedAuthority::new).toList();
     }
 

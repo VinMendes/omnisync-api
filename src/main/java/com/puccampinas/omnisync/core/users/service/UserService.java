@@ -3,24 +3,33 @@ package com.puccampinas.omnisync.core.users.service;
 import com.puccampinas.omnisync.core.users.dto.UserResponse;
 import com.puccampinas.omnisync.core.users.dto.UserStatusUpdateRequest;
 import com.puccampinas.omnisync.core.users.dto.UserUpdateRequest;
+import com.puccampinas.omnisync.core.users.entity.RoleResource;
+import com.puccampinas.omnisync.core.users.entity.TenantRole;
 import com.puccampinas.omnisync.core.users.entity.User;
+import com.puccampinas.omnisync.core.users.entity.UserAccess;
 import com.puccampinas.omnisync.core.users.entity.UserResource;
+import com.puccampinas.omnisync.core.users.enums.Permission;
 import com.puccampinas.omnisync.core.users.enums.Role;
+import com.puccampinas.omnisync.core.users.repository.TenantRoleRepository;
 import com.puccampinas.omnisync.core.users.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
+    private final TenantRoleRepository tenantRoleRepository;
 
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, TenantRoleRepository tenantRoleRepository) {
         this.userRepository = userRepository;
+        this.tenantRoleRepository = tenantRoleRepository;
     }
 
     public UserResponse findMe(String email) {
@@ -56,15 +65,20 @@ public class UserService {
     }
 
 
+    @Transactional
     public UserResponse update(String authenticatedEmail, Long id, UserUpdateRequest request) {
         User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
         User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
-        UserResource updatedResource = user.getResource()
-                .update(request.resource(), request.role(), request.permissions());
+        TenantRole currentRole = requireRole(user);
+        UserAccess access = UserAccess.forUpdate(
+                request.resource(), request.role(), request.permissions(), currentRole.getName());
+        Set<Permission> selectedPermissions = access.effectivePermissions(currentRole);
+        UserResource updatedResource = user.getResource().update(request.resource());
 
         if (!isAdmin(authenticatedUser)
                 && Objects.equals(authenticatedUser.getId(), user.getId())
-                && changesOwnPrivileges(user.getResource(), updatedResource)) {
+                && (currentRole.getName() != access.role()
+                    || !currentRole.getPermissions().equals(selectedPermissions))) {
             throw new AccessDeniedException("Não é permitido alterar o próprio papel ou permissões.");
         }
 
@@ -93,6 +107,13 @@ public class UserService {
             user.setName(trimmedName);
         }
 
+        if (!Objects.equals(currentRole.getSystemClientId(), user.getSystemClientId())) {
+            throw new IllegalStateException("A role do usuário pertence a outra empresa.");
+        }
+
+        currentRole.setName(access.role());
+        currentRole.setResource(RoleResource.of(selectedPermissions));
+        tenantRoleRepository.save(currentRole);
         user.setResource(updatedResource);
 
         User savedUser = userRepository.save(user);
@@ -122,26 +143,29 @@ public class UserService {
                 .orElseThrow(() -> new EntityNotFoundException("Usuário não encontrado."));
     }
 
-    private boolean changesOwnPrivileges(UserResource currentResource, UserResource updatedResource) {
-        return currentResource.role() != updatedResource.role()
-                || !currentResource.permissions().equals(updatedResource.permissions());
+    private boolean isAdmin(User user) {
+        return requireRole(user).getName() == Role.ADMIN;
     }
 
-    private boolean isAdmin(User user) {
-        return user.getResource().role() == Role.ADMIN;
+    private TenantRole requireRole(User user) {
+        if (user.getTenantRole() == null) {
+            throw new IllegalStateException("Usuário sem role configurada.");
+        }
+        return user.getTenantRole();
     }
 
     private UserResponse toResponse(User user) {
+        TenantRole tenantRole = requireRole(user);
         return new UserResponse(
                 user.getId(),
                 user.getSystemClientId(),
                 user.getName(),
                 user.getEmail(),
-                user.getResource().toLegacyJson(),
+                user.getResource().toLegacyJson(tenantRole.getName(), tenantRole.getPermissions()),
                 user.getActive(),
                 user.getCreatedAt(),
-                user.getResource().role().name(),
-                user.getResource().permissionNames()
+                tenantRole.getName().name(),
+                tenantRole.permissionNames()
         );
     }
 }

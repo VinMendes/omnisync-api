@@ -322,11 +322,11 @@ class AuthFlowIntegrationTest {
         assertThat(jwtService.validateAndGetClaims(access.getValue()).keySet())
                 .containsExactlyInAnyOrder("sub", "iat", "exp", "token_type");
         mvc.perform(get("/test/auth-identity").cookie(access)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_ADMIN", "USER_MANAGE")));
+                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_ADMIN", "PERM_USER_MANAGE")));
 
         user.setTenantRole(role(Role.VIEWER, Set.of(Permission.PRODUCT_READ)));
         mvc.perform(get("/test/auth-identity").cookie(access)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_VIEWER", "PRODUCT_READ")));
+                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_VIEWER", "PERM_PRODUCT_READ")));
     }
 
     private ResultActions login(String email, String password) throws Exception {

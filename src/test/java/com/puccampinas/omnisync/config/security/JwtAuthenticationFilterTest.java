@@ -161,7 +161,7 @@ class JwtAuthenticationFilterTest {
                 .andExpect(jsonPath("$.username").value("vinicius@email.com"))
                 .andExpect(jsonPath("$.userId").value(1))
                 .andExpect(jsonPath("$.systemClientId").value(10))
-                .andExpect(jsonPath("$.authorities[0]").value("test:read"));
+                .andExpect(jsonPath("$.authorities[0]").value("PERM_PRODUCT_READ"));
     }
 
     @Test
@@ -192,7 +192,7 @@ class JwtAuthenticationFilterTest {
     private OmniUserPrincipal principal() {
         return new OmniUserPrincipal(
                 1L, 10L, "Usuário de teste", "vinicius@email.com", null, true, true,
-                List.of(new SimpleGrantedAuthority("test:read"))
+                List.of(new SimpleGrantedAuthority("PERM_PRODUCT_READ"))
         );
     }
 }

@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+
+import static com.puccampinas.omnisync.config.security.PermissionAuthority.HAS_INTEGRATION_MANAGE;
 
 @RestController
 @RequestMapping("/api/integrations/mercadolivre")
@@ -40,6 +43,7 @@ public class MercadoLivreAuthController {
     }
 
     @GetMapping("/connect-url")
+    @PreAuthorize(HAS_INTEGRATION_MANAGE)
     public ResponseEntity<Map<String, String>> connectUrl(@RequestParam Long systemClientId) {
         return ResponseEntity.ok(Map.of(
                 "authorizationUrl",
@@ -48,6 +52,7 @@ public class MercadoLivreAuthController {
     }
 
     @PostMapping("/exchange")
+    @PreAuthorize(HAS_INTEGRATION_MANAGE)
     public ResponseEntity<MercadoLivreIntegrationResponse> exchangeCode(
             @Valid @RequestBody MercadoLivreCodeExchangeRequest request,
             Authentication authentication

@@ -75,7 +75,8 @@ class DashboardControllerTest {
     private OmniUserPrincipal principal() {
         return new OmniUserPrincipal(
                 1L, 3L, "Dashboard user", "dashboard@example.com", null, true, true,
-                List.of(new SimpleGrantedAuthority("PRODUCT_READ"), new SimpleGrantedAuthority("SALE_READ"))
+                List.of(new SimpleGrantedAuthority("PERM_PRODUCT_READ"),
+                        new SimpleGrantedAuthority("PERM_SALE_READ"))
         );
     }
 }

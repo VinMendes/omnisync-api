@@ -75,7 +75,7 @@ class CustomUserDetailsServiceTest {
                 "permissions", java.util.List.of("PRODUCT_READ", "ALL_POWERS"))).permissions()));
 
         assertThat(service.loadUserByUsername("user@example.com").getAuthorities()).extracting("authority")
-                .containsExactly("PRODUCT_READ", "ROLE_VIEWER");
+                .containsExactly("PERM_PRODUCT_READ", "ROLE_VIEWER");
     }
 
     @Test
@@ -136,7 +136,7 @@ class CustomUserDetailsServiceTest {
         user.setTenantRole(role(Role.ADMIN, Set.of(Permission.PRODUCT_READ, Permission.USER_MANAGE)));
 
         assertThat(service.loadUserByUsername("user@example.com").getAuthorities()).extracting("authority")
-                .containsExactly("PRODUCT_READ", "ROLE_ADMIN", "USER_MANAGE");
+                .containsExactly("PERM_PRODUCT_READ", "PERM_USER_MANAGE", "ROLE_ADMIN");
     }
 
     @Test
@@ -148,7 +148,8 @@ class CustomUserDetailsServiceTest {
         user.setTenantRole(role(Role.VIEWER, Set.of()));
         OmniUserPrincipal current = service.loadActiveUserByUsername("user@example.com");
 
-        assertThat(first.getAuthorities()).extracting("authority").containsExactly("PRODUCT_READ", "ROLE_VIEWER");
+        assertThat(first.getAuthorities()).extracting("authority")
+                .containsExactly("PERM_PRODUCT_READ", "ROLE_VIEWER");
         assertThat(current.getAuthorities()).extracting("authority").containsExactly("ROLE_VIEWER");
     }
 

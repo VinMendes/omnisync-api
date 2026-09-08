@@ -1,6 +1,7 @@
 package com.puccampinas.omnisync.integration.controller;
 
 import com.puccampinas.omnisync.core.users.service.UserService;
+import com.puccampinas.omnisync.config.security.TenantAccess;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreCodeExchangeRequest;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationResponse;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationStatusResponse;
@@ -9,6 +10,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,16 +20,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
+import static com.puccampinas.omnisync.config.security.PermissionAuthority.HAS_INTEGRATION_MANAGE;
+
 @RestController
 @RequestMapping("/api/integrations/mercadolivre")
 public class MercadoLivreAuthController {
 
     private final MercadoLivreAuthService service;
     private final UserService userService;
+    private final TenantAccess access;
 
-    public MercadoLivreAuthController(MercadoLivreAuthService service, UserService userService) {
+    public MercadoLivreAuthController(MercadoLivreAuthService service, UserService userService, TenantAccess access) {
         this.service = service;
         this.userService = userService;
+        this.access = access;
     }
 
     @GetMapping("/status")
@@ -40,7 +46,9 @@ public class MercadoLivreAuthController {
     }
 
     @GetMapping("/connect-url")
+    @PreAuthorize(HAS_INTEGRATION_MANAGE)
     public ResponseEntity<Map<String, String>> connectUrl(@RequestParam Long systemClientId) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(Map.of(
                 "authorizationUrl",
                 service.generateAuthorizationUrl(systemClientId)
@@ -48,6 +56,7 @@ public class MercadoLivreAuthController {
     }
 
     @PostMapping("/exchange")
+    @PreAuthorize(HAS_INTEGRATION_MANAGE)
     public ResponseEntity<MercadoLivreIntegrationResponse> exchangeCode(
             @Valid @RequestBody MercadoLivreCodeExchangeRequest request,
             Authentication authentication

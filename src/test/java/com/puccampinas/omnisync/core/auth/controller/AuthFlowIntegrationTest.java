@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.auth.controller;
 
+import com.puccampinas.omnisync.core.auth.service.RegistrationService;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.puccampinas.omnisync.config.security.JwtAuthenticationFilter;
@@ -78,6 +80,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.cors.allowed-origins=http://localhost:5173"
 })
 class AuthFlowIntegrationTest {
+
+    @MockitoBean
+    private RegistrationService registrationService;
 
     static final String TEST_SECRET = "isolated-auth-flow-test-key-0123456789-0123456789";
     private static final String EMAIL = "user@example.com";
@@ -282,18 +287,14 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
-    void shouldPreserveRegistrationContractWithoutAnAdminSession() throws Exception {
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
-            User registered = invocation.getArgument(0);
-            ReflectionTestUtils.setField(registered, "id", 2L);
-            return registered;
-        });
+    void shouldRejectLegacyRegistrationWithoutAnAdminSession() throws Exception {
         mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(Map.of("systemClientId", 10, "name", "Nova conta",
                                 "email", "new@example.com", "password", PASSWORD, "resource", Map.of("role", "viewer")))))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.userId").value(2))
-                .andExpect(jsonPath("$.email").value("new@example.com"))
-                .andExpect(cookie().exists("ACCESS_TOKEN")).andExpect(cookie().exists("REFRESH_TOKEN"));
+                .andExpect(status().isForbidden())
+                .andExpect(cookie().doesNotExist("ACCESS_TOKEN"))
+                .andExpect(cookie().doesNotExist("REFRESH_TOKEN"));
+        org.mockito.Mockito.verify(userRepository, org.mockito.Mockito.never()).save(any(User.class));
     }
 
     @Test
@@ -322,11 +323,11 @@ class AuthFlowIntegrationTest {
         assertThat(jwtService.validateAndGetClaims(access.getValue()).keySet())
                 .containsExactlyInAnyOrder("sub", "iat", "exp", "token_type");
         mvc.perform(get("/test/auth-identity").cookie(access)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_ADMIN", "USER_MANAGE")));
+                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_ADMIN", "PERM_USER_MANAGE")));
 
         user.setTenantRole(role(Role.VIEWER, Set.of(Permission.PRODUCT_READ)));
         mvc.perform(get("/test/auth-identity").cookie(access)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_VIEWER", "PRODUCT_READ")));
+                .andExpect(jsonPath("$.authorities", containsInAnyOrder("ROLE_VIEWER", "PERM_PRODUCT_READ")));
     }
 
     private ResultActions login(String email, String password) throws Exception {

@@ -6,12 +6,13 @@ import java.time.Instant;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ErrorResponse(
+        int status,
         String message,
         String code,
         Integer retryAfterSeconds,
         Instant lastSyncAt
 ) {
-    public ErrorResponse(String message) {
-        this(message, null, null, null);
+    public ErrorResponse(int status, String message) {
+        this(status, message, null, null, null);
     }
 }

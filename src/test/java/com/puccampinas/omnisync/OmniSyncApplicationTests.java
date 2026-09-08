@@ -61,11 +61,12 @@ class OmniSyncApplicationTests {
     @Test
     void shouldPersistTypedJsonbAndExposeDefaultsThroughMe() throws Exception {
         Long companyId = company();
-        var response = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+        User admin = user(companyId, "admin@example.com", Role.ADMIN, Role.ADMIN.defaultPermissions());
+        mvc.perform(post("/api/users").cookie(access(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(Map.of("systemClientId", companyId, "name", "Usuário de teste",
                                 "email", "typed@example.com", "password", "test-password", "role", "MANAGER",
                                 "resource", Map.of("cpf", "preserved")))))
-                .andExpect(status().isOk()).andReturn().getResponse();
+                .andExpect(status().isCreated()).andExpect(header().doesNotExist("Set-Cookie"));
         entityManager.flush();
         entityManager.clear();
 
@@ -76,7 +77,7 @@ class OmniSyncApplicationTests {
         assertThat(entityManager.createNativeQuery("SELECT resource ->> 'role' FROM users WHERE id = ?1", String.class)
                 .setParameter(1, stored.getId()).getSingleResult()).isNull();
 
-        mvc.perform(get("/api/users/me").cookie(response.getCookie("ACCESS_TOKEN")))
+        mvc.perform(get("/api/users/me").cookie(access(stored)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.role").value("MANAGER"))
                 .andExpect(jsonPath("$.permissions", containsInAnyOrder(
                         "PRODUCT_READ", "PRODUCT_WRITE", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")))
@@ -86,15 +87,17 @@ class OmniSyncApplicationTests {
 
     @Test
     void shouldAcceptLegacyEditorAndExposeCanonicalSellerWithoutChangingFrontend() throws Exception {
-        var response = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(Map.of("systemClientId", company(), "name", "Editor legado",
+        Long companyId = company();
+        User admin = user(companyId, "admin@example.com", Role.ADMIN, Role.ADMIN.defaultPermissions());
+        mvc.perform(post("/api/users").cookie(access(admin)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("systemClientId", companyId, "name", "Editor legado",
                                 "email", "legacy@example.com", "password", "test-password", "resource",
                                 Map.of("role", "editor", "permissions", List.of("Anúncios", "Gestão de estoque"))))))
-                .andExpect(status().isOk()).andReturn().getResponse();
+                .andExpect(status().isCreated()).andExpect(header().doesNotExist("Set-Cookie"));
         entityManager.flush();
         entityManager.clear();
         assertThat(users.findByEmail("legacy@example.com").orElseThrow().getTenantRole().getName()).isEqualTo(Role.SELLER);
-        mvc.perform(get("/api/users/me").cookie(response.getCookie("ACCESS_TOKEN")))
+        mvc.perform(get("/api/users/me").cookie(access(users.findByEmail("legacy@example.com").orElseThrow())))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.role").value("SELLER"))
                 .andExpect(jsonPath("$.resource.role").value("editor"))
                 .andExpect(jsonPath("$.permissions", containsInAnyOrder(
@@ -123,7 +126,9 @@ class OmniSyncApplicationTests {
     @ParameterizedTest
     @ValueSource(strings = {"top-role", "nested-role", "top-permission", "nested-permission", "bad-permission-shape"})
     void shouldRejectUnknownOrMalformedAccessFieldsWith400BeforeSaving(String scenario) throws Exception {
-        Map<String, Object> payload = new java.util.LinkedHashMap<>(Map.of("systemClientId", company(),
+        Long companyId = company();
+        User admin = user(companyId, "admin@example.com", Role.ADMIN, Role.ADMIN.defaultPermissions());
+        Map<String, Object> payload = new java.util.LinkedHashMap<>(Map.of("systemClientId", companyId,
                 "name", "Inválido", "email", "invalid@example.com", "password", "test-password"));
         String error = switch (scenario) {
             case "top-role" -> { payload.put("role", "superuser"); yield "Role desconhecida: superuser"; }
@@ -132,7 +137,8 @@ class OmniSyncApplicationTests {
             case "nested-permission" -> { payload.put("resource", Map.of("permissions", List.of("ALL_POWERS"))); yield "Permissão desconhecida: ALL_POWERS"; }
             default -> { payload.put("resource", Map.of("permissions", "PRODUCT_READ")); yield "lista de strings"; }
         };
-        mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(payload)))
+        mvc.perform(post("/api/users").cookie(access(admin)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(payload)))
                 .andExpect(status().isBadRequest()).andExpect(content().string(containsString(error)));
         assertThat(users.findByEmail("invalid@example.com")).isEmpty();
     }
@@ -174,24 +180,25 @@ class OmniSyncApplicationTests {
     @Test
     void shouldApplyDifferentSellerPermissionsForUsersOfTheSameTenant() throws Exception {
         Long companyId = company();
+        User admin = user(companyId, "admin@example.com", Role.ADMIN, Role.ADMIN.defaultPermissions());
 
-        var registeredA = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/users").cookie(access(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(Map.of("systemClientId", companyId, "name", "Vendedor A",
                                 "email", "seller-a@example.com", "password", "test-password", "resource",
                                 Map.of("role", "editor", "permissions", List.of("Anúncios", "Vendas"))))))
-                .andExpect(status().isOk()).andReturn().getResponse();
-        var registeredB = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                .andExpect(status().isCreated());
+        mvc.perform(post("/api/users").cookie(access(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(Map.of("systemClientId", companyId, "name", "Vendedor B",
                                 "email", "seller-b@example.com", "password", "test-password", "resource",
                                 Map.of("role", "editor", "permissions",
                                         List.of("Anúncios", "Vendas", "Gestão de estoque"))))))
-                .andExpect(status().isOk()).andReturn().getResponse();
+                .andExpect(status().isCreated());
 
-        mvc.perform(get("/api/users/me").cookie(registeredA.getCookie("ACCESS_TOKEN")))
+        mvc.perform(get("/api/users/me").cookie(access(users.findByEmail("seller-a@example.com").orElseThrow())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.permissions", containsInAnyOrder(
                         "PRODUCT_READ", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")));
-        mvc.perform(get("/api/users/me").cookie(registeredB.getCookie("ACCESS_TOKEN")))
+        mvc.perform(get("/api/users/me").cookie(access(users.findByEmail("seller-b@example.com").orElseThrow())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.permissions", containsInAnyOrder(
                         "PRODUCT_READ", "PRODUCT_WRITE", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE")));

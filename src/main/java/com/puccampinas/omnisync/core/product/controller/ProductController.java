@@ -2,6 +2,8 @@ package com.puccampinas.omnisync.core.product.controller;
 
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.service.ProductService;
+import com.puccampinas.omnisync.config.security.TenantAccess;
+import com.puccampinas.omnisync.core.users.enums.Permission;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,9 +20,11 @@ import static com.puccampinas.omnisync.config.security.PermissionAuthority.HAS_P
 public class ProductController {
 
     private final ProductService service;
+    private final TenantAccess access;
 
-    public ProductController(ProductService service) {
+    public ProductController(ProductService service, TenantAccess access) {
         this.service = service;
+        this.access = access;
     }
 
     @PostMapping
@@ -29,6 +33,10 @@ public class ProductController {
             @PathVariable Long systemClientId,
             @RequestBody ProductDto data
     ) {
+        access.requireTenant(systemClientId);
+        if (data.isAnnouncement()) {
+            access.requirePermission(Permission.LISTING_PUBLISH);
+        }
         return ResponseEntity.ok(this.service.create(systemClientId, data));
     }
 
@@ -39,6 +47,7 @@ public class ProductController {
             @RequestParam(defaultValue = "0") long offset,
             @RequestParam(defaultValue = "20") int limit
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.getAll(systemClientId, offset, limit));
     }
 
@@ -48,6 +57,7 @@ public class ProductController {
             @PathVariable Long systemClientId,
             @PathVariable String sku
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.getBySku(systemClientId, sku));
     }
 
@@ -57,6 +67,7 @@ public class ProductController {
             @PathVariable Long systemClientId,
             @PathVariable Long id
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.getById(systemClientId, id));
     }
 
@@ -67,6 +78,7 @@ public class ProductController {
             @PathVariable Long id,
             @RequestBody ProductDto data
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.update(systemClientId, id, data));
     }
 
@@ -77,6 +89,7 @@ public class ProductController {
             @PathVariable Long id,
             @RequestBody Map<String, Object> mlResource
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.announce(systemClientId, id, mlResource));
     }
 
@@ -86,6 +99,7 @@ public class ProductController {
             @PathVariable Long systemClientId,
             @PathVariable Long id
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.delete(systemClientId, id));
     }
 }

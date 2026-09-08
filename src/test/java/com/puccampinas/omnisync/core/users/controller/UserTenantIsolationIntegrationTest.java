@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.users.controller;
 
+import com.puccampinas.omnisync.core.auth.service.RegistrationService;
+
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
@@ -39,6 +41,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc(addFilters = false)
 @Import(UserService.class)
 class UserTenantIsolationIntegrationTest {
+
+    @MockitoBean
+    private RegistrationService registrationService;
 
     private static final String ADMIN_A_EMAIL = "admin-a@empresa.com";
 

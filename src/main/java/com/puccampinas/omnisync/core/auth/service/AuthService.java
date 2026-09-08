@@ -129,7 +129,7 @@ public class AuthService {
         String normalizedEmail = normalizeEmail(req.email());
 
         if (userRepository.existsByEmail(normalizedEmail)) {
-            throw new RuntimeException("Já existe usuário com esse email");
+            throw new IllegalArgumentException("Já existe usuário com esse email");
         }
 
         TenantRole tenantRole = new TenantRole();

@@ -1,6 +1,7 @@
 package com.puccampinas.omnisync.integration.controller;
 
 import com.puccampinas.omnisync.core.users.service.UserService;
+import com.puccampinas.omnisync.config.security.TenantAccess;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreCodeExchangeRequest;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationResponse;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreIntegrationStatusResponse;
@@ -27,10 +28,12 @@ public class MercadoLivreAuthController {
 
     private final MercadoLivreAuthService service;
     private final UserService userService;
+    private final TenantAccess access;
 
-    public MercadoLivreAuthController(MercadoLivreAuthService service, UserService userService) {
+    public MercadoLivreAuthController(MercadoLivreAuthService service, UserService userService, TenantAccess access) {
         this.service = service;
         this.userService = userService;
+        this.access = access;
     }
 
     @GetMapping("/status")
@@ -45,6 +48,7 @@ public class MercadoLivreAuthController {
     @GetMapping("/connect-url")
     @PreAuthorize(HAS_INTEGRATION_MANAGE)
     public ResponseEntity<Map<String, String>> connectUrl(@RequestParam Long systemClientId) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(Map.of(
                 "authorizationUrl",
                 service.generateAuthorizationUrl(systemClientId)

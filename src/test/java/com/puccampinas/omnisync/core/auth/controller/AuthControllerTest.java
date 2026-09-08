@@ -1,9 +1,11 @@
 package com.puccampinas.omnisync.core.auth.controller;
 
+import com.puccampinas.omnisync.core.auth.service.RegistrationService;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
-import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
+import com.puccampinas.omnisync.core.auth.dto.RegisterCompanyRequest;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
@@ -24,6 +26,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(AuthController.class)
 @AutoConfigureMockMvc(addFilters = false)
 class AuthControllerTest {
+
+    @MockitoBean
+    private RegistrationService registrationService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -51,8 +56,9 @@ class AuthControllerTest {
 
     @Test
     void register_success() throws Exception {
-        RegisterRequest request = new RegisterRequest(
-                1L,
+        RegisterCompanyRequest request = new RegisterCompanyRequest(
+                "Empresa de teste",
+                "11222333000181",
                 "Vinicius",
                 "vini@email.com",
                 "123456",
@@ -64,7 +70,7 @@ class AuthControllerTest {
         user.setEmail("vini@email.com");
         user.setActive(true);
 
-        when(authService.register(any(RegisterRequest.class))).thenReturn(user);
+        when(registrationService.registerCompany(any(RegisterCompanyRequest.class))).thenReturn(user);
         when(authService.generateAccessToken(user)).thenReturn("access-token");
         when(authService.generateRefreshToken(user)).thenReturn("refresh-token");
         when(authService.buildAuthResponse(
@@ -82,7 +88,7 @@ class AuthControllerTest {
                 "refresh-token"
         ));
 
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register-company")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())

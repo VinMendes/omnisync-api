@@ -63,6 +63,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 
 /** Login, HTTP, serviços, JSONB e relacionamentos reais; somente a chamada ao marketplace é simulada. */
 @SpringBootTest
@@ -283,6 +284,142 @@ class RelationalPermissionFlowIntegrationTest {
     }
 
     @Test
+    void creatingMembersPreservesTheAdminSessionAndPersistsTheirIndividualPermissions() throws Exception {
+        Cookie cookie = login(admin);
+        MvcResult result = mvc.perform(post("/api/users").cookie(cookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(memberPayload(company.getId(), "created-member@example.invalid")))
+                .andExpect(status().isCreated())
+                .andExpect(header().doesNotExist("Set-Cookie"))
+                .andExpect(jsonPath("$.role").value("SELLER"))
+                .andExpect(jsonPath("$.permissions", containsInAnyOrder("SALE_READ", "SALE_WRITE")))
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.accessToken").doesNotExist())
+                .andReturn();
+        flushAndClear();
+        long id = json.readTree(result.getResponse().getContentAsString()).get("id").asLong();
+        User member = users.findById(id).orElseThrow();
+        assertThat(member.getTenantRole().getPermissions())
+                .containsExactlyInAnyOrder(Permission.SALE_READ, Permission.SALE_WRITE);
+        assertThat(linkedRoleId(member)).isNotIn(linkedRoleId(sellerA), linkedRoleId(sellerB), linkedRoleId(admin));
+        mvc.perform(get("/api/users/me").cookie(cookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(admin.getId()));
+        mvc.perform(get("/api/users/me").cookie(login(member)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id));
+    }
+
+    @Test
+    void memberCreationRejectsAnonymousUsersMissingPermissionsAndForeignTenants() throws Exception {
+        String email = "rejected-member@example.invalid";
+        String payload = memberPayload(company.getId(), email);
+        mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isUnauthorized());
+        forbidden(mvc.perform(post("/api/users").cookie(login(sellerA))
+                .contentType(MediaType.APPLICATION_JSON).content(payload)), "USER_MANAGE");
+        SystemClient foreign = company("foreign-member");
+        mvc.perform(post("/api/users").cookie(login(admin)).contentType(MediaType.APPLICATION_JSON)
+                        .content(memberPayload(foreign.getId(), email)))
+                .andExpect(status().isNotFound());
+        assertThat(users.findByEmail(email)).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM roles WHERE system_client_id = ?",
+                Long.class, foreign.getId())).isZero();
+    }
+
+    @Test
+    void memberCreationRejectsUnknownPermissionsBeforeWritingRoles() throws Exception {
+        String payload = memberPayload(company.getId(), "invalid-member@example.invalid")
+                .replace("Vendas", "ALL_POWERS");
+        mvc.perform(post("/api/users").cookie(login(admin))
+                        .contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Permissão desconhecida: ALL_POWERS"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM roles WHERE system_client_id = ?",
+                Long.class, company.getId())).isEqualTo(3L);
+    }
+
+    @ParameterizedTest
+    @CsvSource(textBlock = """
+            GET, /api/products/{client}, {}
+            GET, /api/products/{client}/{product}, {}
+            GET, /api/products/{client}/sku/PRIVATE-FOREIGN-PRODUCT, {}
+            POST, /api/products/{client}, {}
+            PUT, /api/products/{client}/{product}, {}
+            DELETE, /api/products/{client}/{product}, {}
+            POST, /api/products/{client}/{product}/announce, {}
+            GET, /api/sales/{client}, {}
+            POST, /api/sales/{client}, []
+            GET, /api/client/{client}, {}
+            PUT, /api/client/{client}, {}
+            DELETE, /api/client/{client}, {}
+            PUT, /api/client/updateMarketplaces/{client}, {}
+            GET, /api/integrations/mercadolivre/connect-url, {}
+            GET, /api/integrations/mercadolivre/catalog/categories, {}
+            GET, /api/integrations/mercadolivre/catalog/categories/suggestions, {}
+            GET, /api/integrations/mercadolivre/catalog/categories/MLB1/attributes, {}
+            GET, /api/integrations/mercadolivre/catalog/categories/MLB1/requirements, {}
+            POST, /api/integrations/mercadolivre/catalog/{client}/sync, {}
+            """)
+    void adminCannotAccessOtherTenantsThroughPathsOrQueryParameters(String method, String path, String body)
+            throws Exception {
+        SystemClient foreign = company("foreign-path-target");
+        Product foreignProduct = product(foreign, "PRIVATE-FOREIGN-PRODUCT");
+        flushAndClear();
+        String endpoint = path.replace("{client}", foreign.getId().toString())
+                .replace("{product}", foreignProduct.getId().toString());
+        mvc.perform(request(HttpMethod.valueOf(method), endpoint).cookie(login(admin))
+                        .param("systemClientId", foreign.getId().toString()).param("q", "test")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound());
+        assertThat(clients.findById(foreign.getId()).orElseThrow().getActive()).isTrue();
+        assertThat(products.findById(foreignProduct.getId()).orElseThrow().getActive()).isTrue();
+        org.mockito.Mockito.verifyNoInteractions(listings);
+    }
+
+    @ParameterizedTest
+    @CsvSource(textBlock = """
+            GET, /api/client/{client}
+            PUT, /api/client/{client}
+            DELETE, /api/client/{client}
+            PUT, /api/client/updateMarketplaces/{client}
+            POST, /api/client
+            """)
+    void companyRoutesRequireAuthentication(String method, String path) throws Exception {
+        mvc.perform(request(HttpMethod.valueOf(method), path.replace("{client}", company.getId().toString()))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void companyWritesRequireTheirRespectivePermissions() throws Exception {
+        Cookie cookie = login(sellerA);
+        forbidden(mvc.perform(put("/api/client/{client}", company.getId()).cookie(cookie)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Changed\"}")), "SETTINGS_MANAGE");
+        forbidden(mvc.perform(request(HttpMethod.DELETE, "/api/client/{client}", company.getId()).cookie(cookie)),
+                "SETTINGS_MANAGE");
+        forbidden(mvc.perform(put("/api/client/updateMarketplaces/{client}", company.getId()).cookie(cookie)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"mercado_livre\":false}")), "INTEGRATION_MANAGE");
+        mvc.perform(get("/api/client/checkCNPJ/11222333000181")).andExpect(status().isOk());
+    }
+
+    @Test
+    void aWriterWithPublishPermissionCanStillCreateAnAnnouncement() throws Exception {
+        User writer = user(company, "authorized-publisher", Role.SELLER,
+                Set.of(Permission.PRODUCT_WRITE, Permission.LISTING_PUBLISH));
+        createProduct(login(writer), "AUTHORIZED-ANNOUNCEMENT", true).andExpect(status().isOk());
+        verify(listings).createListing(eq(company.getId()), any(Product.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"INTEGRATION_MANAGE", "PRODUCT_WRITE"})
+    void catalogSyncRequiresBothPermissions(Permission onlyPermission) throws Exception {
+        User account = user(company, "partial-sync", Role.SELLER, Set.of(onlyPermission));
+        String missing = onlyPermission == Permission.INTEGRATION_MANAGE ? "PRODUCT_WRITE" : "INTEGRATION_MANAGE";
+        forbidden(mvc.perform(post("/api/integrations/mercadolivre/catalog/{client}/sync", company.getId())
+                .cookie(login(account))), missing);
+        org.mockito.Mockito.verifyNoInteractions(listings);
+    }
+
+    @Test
     void productWriteAloneMustNotPublishThroughTheCreatePayload() throws Exception {
         User writer = user(company, "writer", Role.SELLER, Set.of(Permission.PRODUCT_WRITE));
         flushAndClear();
@@ -349,6 +486,10 @@ class RelationalPermissionFlowIntegrationTest {
                 () -> status().isForbidden().match(result),
                 () -> verify(listings, never()).listAllClientListings(eq(company.getId()))
         );
+        mvc.perform(post("/api/integrations/mercadolivre/catalog/{client}/sync", company.getId())
+                        .cookie(login(admin)))
+                .andExpect(status().isOk());
+        verify(listings).listAllClientListings(company.getId());
     }
 
     private SystemClient company(String name) {
@@ -358,6 +499,13 @@ class RelationalPermissionFlowIntegrationTest {
         client.setActive(true);
         client.setResource(Map.of("mercado_livre", true));
         return clients.saveAndFlush(client);
+    }
+
+    private String memberPayload(Long clientId, String email) throws Exception {
+        return json.writeValueAsString(Map.of(
+                "systemClientId", clientId, "name", "New member", "email", email, "password", PASSWORD,
+                "resource", Map.of("role", "editor", "permissions", List.of("Vendas"))
+        ));
     }
 
     private User user(SystemClient client, String name, Role roleName, Set<Permission> permissions) {

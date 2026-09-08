@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.integration.controller;
 
+import com.puccampinas.omnisync.config.security.TenantAccess;
+
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
@@ -28,6 +30,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(MercadoLivreCatalogController.class)
 @AutoConfigureMockMvc(addFilters = false)
 class MercadoLivreCatalogControllerTest {
+
+    @MockitoBean
+    private TenantAccess tenantAccess;
 
     @Autowired
     private MockMvc mockMvc;

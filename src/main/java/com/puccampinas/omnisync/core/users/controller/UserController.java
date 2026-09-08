@@ -4,6 +4,9 @@ import com.puccampinas.omnisync.core.users.dto.UserResponse;
 import com.puccampinas.omnisync.core.users.dto.UserStatusUpdateRequest;
 import com.puccampinas.omnisync.core.users.dto.UserUpdateRequest;
 import com.puccampinas.omnisync.core.users.service.UserService;
+import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
+import com.puccampinas.omnisync.core.auth.service.RegistrationService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -18,9 +21,18 @@ import static com.puccampinas.omnisync.config.security.PermissionAuthority.HAS_U
 public class UserController {
 
     private final UserService userService;
+    private final RegistrationService registrationService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, RegistrationService registrationService) {
         this.userService = userService;
+        this.registrationService = registrationService;
+    }
+
+    @PostMapping
+    @PreAuthorize(HAS_USER_MANAGE)
+    public ResponseEntity<UserResponse> create(@Valid @RequestBody RegisterRequest request) {
+        // Não emite cookies: a sessão de quem está administrando permanece a mesma.
+        return ResponseEntity.status(201).body(registrationService.createMember(request));
     }
 
     @GetMapping("/me")

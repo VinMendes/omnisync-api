@@ -23,6 +23,7 @@ public final class PermissionAuthority {
     public static final String HAS_SALE_WRITE = "hasAuthority('" + SALE_WRITE + "')";
     public static final String HAS_USER_MANAGE = "hasAuthority('" + USER_MANAGE + "')";
     public static final String HAS_INTEGRATION_MANAGE = "hasAuthority('" + INTEGRATION_MANAGE + "')";
+    public static final String HAS_SETTINGS_MANAGE = "hasAuthority('" + SETTINGS_MANAGE + "')";
 
     private PermissionAuthority() {
     }

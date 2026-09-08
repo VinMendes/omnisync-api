@@ -1,5 +1,24 @@
 # Validação de autorização — 08/09/2026
 
+## Atualização após as correções
+
+As quatro falhas reproduzidas abaixo foram corrigidas. A suíte atual executou
+**272 testes, todos aprovados**, incluindo os quatro testes de regressão originais.
+O frontend passou em **67 testes**, build de produção e lint dos arquivos alterados.
+Os resultados anteriores são preservados a seguir como histórico da investigação.
+
+- Cadastro público cria empresa e primeiro administrador atomicamente, sem aceitar vínculo com empresa existente.
+- `POST /api/users` exige USER_MANAGE e cliente correspondente, sem trocar cookies do administrador.
+- Produtos, vendas, empresas e catálogo/conexão ML verificam a empresa do principal.
+- Criar produto com anúncio exige também LISTING_PUBLISH; sincronizar exige INTEGRATION_MANAGE e PRODUCT_WRITE.
+- O frontend preserva permissões vazias e não renova o token após `403`.
+
+O teste de cadastro atomicamente usa transações reais da aplicação, sem transação externa
+de teste, e confirma que falhar por e-mail duplicado não deixa uma empresa órfã nem emite cookies.
+Os contratos atuais e a coordenação de publicação estão em [autenticação e permissões](authentication-and-user-permissions.md).
+
+## Investigação anterior às correções
+
 Base: commit `d203c5f`, branch `FEAT/permission-based-authorization`.
 
 O carregamento das permissões relacionais e os bloqueios dos endpoints mapeados funcionam. A validação adicional identificou quatro caminhos sem a proteção necessária; a aplicação ainda não deve ser considerada pronta do ponto de vista de controle de acesso.

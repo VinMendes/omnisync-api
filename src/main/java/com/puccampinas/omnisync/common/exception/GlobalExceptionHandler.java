@@ -1,6 +1,7 @@
 package com.puccampinas.omnisync.common.exception;
 
 import jakarta.persistence.EntityNotFoundException;
+import com.puccampinas.omnisync.config.security.PermissionDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
@@ -89,6 +90,9 @@ public class GlobalExceptionHandler {
     }
 
     private String accessDeniedMessage(AccessDeniedException exception) {
+        if (exception instanceof PermissionDeniedException) {
+            return exception.getMessage();
+        }
         if (exception instanceof AuthorizationDeniedException denied
                 && denied.getAuthorizationResult() instanceof ExpressionAuthorizationDecision decision) {
             Matcher matcher = PERMISSION_AUTHORITY.matcher(decision.getExpression().getExpressionString());

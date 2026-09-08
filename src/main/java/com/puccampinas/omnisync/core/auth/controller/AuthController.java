@@ -5,7 +5,8 @@ import com.puccampinas.omnisync.core.auth.dto.AuthResponse;
 import com.puccampinas.omnisync.core.auth.dto.ForgotPasswordRequest;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
 import com.puccampinas.omnisync.core.auth.dto.RefreshResponse;
-import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
+import com.puccampinas.omnisync.core.auth.dto.RegisterCompanyRequest;
+import com.puccampinas.omnisync.core.auth.service.RegistrationService;
 import com.puccampinas.omnisync.core.auth.dto.ResetPasswordRequest;
 import com.puccampinas.omnisync.core.auth.service.AuthService;
 import com.puccampinas.omnisync.core.users.entity.User;
@@ -17,6 +18,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -89,6 +91,7 @@ public class AuthController {
      * Serviço responsável por criar, atualizar e remover os cookies de autenticação.
      */
     private final AuthCookieService authCookieService;
+    private final RegistrationService registrationService;
 
     /**
      * Construtor com injeção de dependências.
@@ -97,40 +100,42 @@ public class AuthController {
      * @param authCookieService serviço responsável pelos cookies de auth
      */
     public AuthController(AuthService authService,
-                          AuthCookieService authCookieService) {
+                          AuthCookieService authCookieService,
+                          RegistrationService registrationService) {
         this.authService = authService;
         this.authCookieService = authCookieService;
+        this.registrationService = registrationService;
     }
 
     /**
-     * Registra um novo usuário no sistema.
+     * Registra uma empresa e seu primeiro administrador na mesma transação.
      *
      * @param req dados enviados para registro
      * @param response resposta HTTP usada para adicionar os cookies
      * @return 200 OK com os dados do usuário cadastrado e os tokens, ou 400 em caso de erro de negócio
      */
-    @PostMapping("/register")
-    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
+    @PostMapping("/register-company")
+    public ResponseEntity<AuthResponse> registerCompany(@Valid @RequestBody RegisterCompanyRequest req,
                                       HttpServletResponse response) {
-        try {
-            User user = authService.register(req);
+        User user = registrationService.registerCompany(req);
 
-            String access = authService.generateAccessToken(user);
-            String refresh = authService.generateRefreshToken(user);
+        String access = authService.generateAccessToken(user);
+        String refresh = authService.generateRefreshToken(user);
 
-            setAuthCookies(response, access, refresh);
+        setAuthCookies(response, access, refresh);
 
-            AuthResponse authResponse = authService.buildAuthResponse(
-                    "Usuário registrado com sucesso",
-                    user,
-                    access,
-                    refresh
-            );
+        AuthResponse authResponse = authService.buildAuthResponse(
+                "Usuário registrado com sucesso", user, access, refresh
+        );
 
-            return ResponseEntity.ok(authResponse);
-        } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        return ResponseEntity.ok(authResponse);
+    }
+
+    /** O cadastro legado não pode mais vincular contas anonimamente a empresas existentes. */
+    @PostMapping("/register")
+    public ResponseEntity<Void> register() {
+        throw new AccessDeniedException(
+                "Não é permitido cadastrar usuários por esta rota. Utilize o cadastro de empresa ou a gestão de usuários.");
     }
 
     /**

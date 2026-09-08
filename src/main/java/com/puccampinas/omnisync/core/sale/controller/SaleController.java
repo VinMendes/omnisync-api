@@ -3,6 +3,7 @@ package com.puccampinas.omnisync.core.sale.controller;
 import com.puccampinas.omnisync.core.sale.dto.SaleCreateRequest;
 import com.puccampinas.omnisync.core.sale.dto.SaleDto;
 import com.puccampinas.omnisync.core.sale.service.SaleService;
+import com.puccampinas.omnisync.config.security.TenantAccess;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,9 +19,11 @@ import static com.puccampinas.omnisync.config.security.PermissionAuthority.HAS_S
 public class SaleController {
 
     private final SaleService saleService;
+    private final TenantAccess access;
 
-    public SaleController(SaleService saleService) {
+    public SaleController(SaleService saleService, TenantAccess access) {
         this.saleService = saleService;
+        this.access = access;
     }
 
     @PostMapping
@@ -29,6 +32,7 @@ public class SaleController {
             @PathVariable Long systemClientId,
             @RequestBody List<SaleCreateRequest> requests
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.saleService.create(systemClientId, requests));
     }
 
@@ -39,6 +43,7 @@ public class SaleController {
             @RequestParam(defaultValue = "0") long offset,
             @RequestParam(defaultValue = "20") int limit
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(saleService.getAll(systemClientId, offset, limit));
     }
 
@@ -48,6 +53,7 @@ public class SaleController {
             @PathVariable Long systemClientId,
             @PathVariable Long id
     ) {
+        access.requireTenant(systemClientId);
         return ResponseEntity.ok(saleService.getById(systemClientId, id));
     }
 }

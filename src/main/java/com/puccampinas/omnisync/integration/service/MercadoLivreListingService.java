@@ -179,11 +179,18 @@ public class MercadoLivreListingService {
             offset += SEARCH_PAGE_LIMIT;
         }
 
+        List<Map<String, Object>> itemDetails = fetchItemDetailsInBatches(accessToken, allItemIds);
+        if (itemDetails.size() != allItemIds.size()) {
+            throw new IllegalStateException(
+                    "Mercado Livre returned an incomplete catalog detail response."
+            );
+        }
+
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("seller_id", sellerId);
         response.put("total", total == null ? allItemIds.size() : total);
         response.put("results", allItemIds);
-        response.put("items", fetchItemDetailsInBatches(accessToken, allItemIds));
+        response.put("items", itemDetails);
         return response;
     }
 

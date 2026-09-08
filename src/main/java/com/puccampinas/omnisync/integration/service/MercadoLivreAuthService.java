@@ -126,8 +126,7 @@ public class MercadoLivreAuthService {
                 integration.getMarketplace(),
                 integration.getActive(),
                 integration.getExpiresAt(),
-                integration.getResource(),
-                encryptor.decrypt(integration.getAccessToken())
+                integration.getResource()
         );
     }
 
@@ -139,7 +138,8 @@ public class MercadoLivreAuthService {
                         integration.getSystemClientId(),
                         integration.getActive(),
                         integration.getExpiresAt(),
-                        integration.getMarketplace().name()
+                        integration.getMarketplace().name(),
+                        integration.getLastSyncAt()
                 ))
                 .orElseGet(() -> MercadoLivreIntegrationStatusResponse.notConnected(systemClientId));
     }

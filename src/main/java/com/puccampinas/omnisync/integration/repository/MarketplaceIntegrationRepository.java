@@ -3,11 +3,13 @@ package com.puccampinas.omnisync.integration.repository;
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface MarketplaceIntegrationRepository extends JpaRepository<MarketplaceIntegration, Long> {
@@ -20,6 +22,18 @@ public interface MarketplaceIntegrationRepository extends JpaRepository<Marketpl
     Optional<MarketplaceIntegration> findBySystemClientIdAndMarketplaceAndActiveTrue(
             Long systemClientId,
             Marketplace marketplace
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT integration
+            FROM MarketplaceIntegration integration
+            WHERE integration.systemClientId = :systemClientId
+              AND integration.marketplace = :marketplace
+            """)
+    Optional<MarketplaceIntegration> findBySystemClientIdAndMarketplaceForUpdate(
+            @Param("systemClientId") Long systemClientId,
+            @Param("marketplace") Marketplace marketplace
     );
 
     @Query(

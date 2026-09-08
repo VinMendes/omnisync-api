@@ -14,6 +14,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 @Entity
@@ -57,6 +58,9 @@ public class MarketplaceIntegration {
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Column(name = "last_sync_at")
+    private Instant lastSyncAt;
 
     public Long getId() {
         return id;
@@ -128,5 +132,13 @@ public class MarketplaceIntegration {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getLastSyncAt() {
+        return lastSyncAt;
+    }
+
+    public void setLastSyncAt(Instant lastSyncAt) {
+        this.lastSyncAt = lastSyncAt;
     }
 }

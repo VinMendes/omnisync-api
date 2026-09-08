@@ -13,14 +13,23 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class MercadoLivreClient {
+
+    private static final Pattern PROVIDER_ERROR_CODE = Pattern.compile("\\\"error\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
 
     private static final String OAUTH_URL = "https://auth.mercadolivre.com.br/authorization";
     private static final String TOKEN_URL = "https://api.mercadolibre.com/oauth/token";
@@ -311,11 +320,12 @@ public class MercadoLivreClient {
                     }
             ).getBody();
         } catch (RestClientResponseException ex) {
-            String responseBody = ex.getResponseBodyAsString();
-            String message = responseBody == null || responseBody.isBlank()
-                    ? "Mercado Livre picture upload failed."
-                    : "Mercado Livre picture upload failed: " + responseBody;
-            throw new ExternalApiException(ex.getStatusCode(), message);
+            throw externalFailure(ex, "Mercado Livre picture upload failed.", false);
+        } catch (ResourceAccessException ex) {
+            throw new ExternalApiException(
+                    org.springframework.http.HttpStatus.BAD_GATEWAY,
+                    "Mercado Livre picture upload timed out."
+            );
         }
     }
 
@@ -328,11 +338,12 @@ public class MercadoLivreClient {
         try {
             return restTemplate.postForObject(TOKEN_URL, request, MercadoLivreTokenResponse.class);
         } catch (RestClientResponseException ex) {
-            String responseBody = ex.getResponseBodyAsString();
-            String message = responseBody == null || responseBody.isBlank()
-                    ? "Mercado Livre token request failed."
-                    : "Mercado Livre token request failed: " + responseBody;
-            throw new ExternalApiException(ex.getStatusCode(), message);
+            throw externalFailure(ex, "Mercado Livre token request failed.", true);
+        } catch (ResourceAccessException ex) {
+            throw new ExternalApiException(
+                    org.springframework.http.HttpStatus.BAD_GATEWAY,
+                    "Mercado Livre token request timed out."
+            );
         }
     }
 
@@ -348,11 +359,58 @@ public class MercadoLivreClient {
         try {
             return restTemplate.exchange(url, method, request, responseType).getBody();
         } catch (RestClientResponseException ex) {
-            String responseBody = ex.getResponseBodyAsString();
-            String message = responseBody == null || responseBody.isBlank()
-                    ? "Mercado Livre request failed."
-                    : "Mercado Livre request failed: " + responseBody;
-            throw new ExternalApiException(ex.getStatusCode(), message);
+            throw externalFailure(ex, "Mercado Livre request failed.", false);
+        } catch (ResourceAccessException ex) {
+            throw new ExternalApiException(
+                    org.springframework.http.HttpStatus.BAD_GATEWAY,
+                    "Mercado Livre request timed out."
+            );
+        }
+    }
+
+    private ExternalApiException externalFailure(
+            RestClientResponseException ex,
+            String safeMessage,
+            boolean preserveClientErrorStatus
+    ) {
+        org.springframework.http.HttpStatusCode safeStatus = ex.getStatusCode().value() == 429
+                || preserveClientErrorStatus && ex.getStatusCode().is4xxClientError()
+                ? ex.getStatusCode()
+                : org.springframework.http.HttpStatus.BAD_GATEWAY;
+        return new ExternalApiException(
+                safeStatus,
+                safeMessage,
+                extractProviderCode(ex.getResponseBodyAsString()),
+                parseRetryAfterSeconds(ex.getResponseHeaders() == null
+                        ? null
+                        : ex.getResponseHeaders().getFirst(HttpHeaders.RETRY_AFTER))
+        );
+    }
+
+    private String extractProviderCode(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return null;
+        }
+        Matcher matcher = PROVIDER_ERROR_CODE.matcher(responseBody);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private Integer parseRetryAfterSeconds(String retryAfter) {
+        if (retryAfter == null || retryAfter.isBlank()) {
+            return null;
+        }
+        try {
+            return Math.max(Integer.parseInt(retryAfter.trim()), 1);
+        } catch (NumberFormatException ignored) {
+            try {
+                long seconds = Duration.between(
+                        ZonedDateTime.now(),
+                        ZonedDateTime.parse(retryAfter, DateTimeFormatter.RFC_1123_DATE_TIME)
+                ).toSeconds();
+                return (int) Math.max(seconds, 1);
+            } catch (DateTimeParseException parseException) {
+                return null;
+            }
         }
     }
 

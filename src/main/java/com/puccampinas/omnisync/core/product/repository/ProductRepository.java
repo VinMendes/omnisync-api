@@ -29,7 +29,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     WHERE system_client_id = :systemClientId
                       AND active = TRUE
                       AND resource -> 'mercado_livre' ->> 'item_id' = :itemId
-                    LIMIT 1
                     """,
             nativeQuery = true
     )
@@ -44,7 +43,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     FROM products
                     WHERE system_client_id = :systemClientId
                       AND resource -> 'mercado_livre' ->> 'item_id' = :itemId
-                    LIMIT 1
                     """,
             nativeQuery = true
     )

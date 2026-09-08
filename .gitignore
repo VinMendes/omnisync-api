@@ -35,3 +35,21 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Codex ###
+.codex/
+
+### Local Spec-Driven Development (GitHub Spec Kit) ###
+.specify/
+.agents/
+specs/
+
+### Runtime / OS ###
+*.class
+*.log
+.env*
+!.env.example
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

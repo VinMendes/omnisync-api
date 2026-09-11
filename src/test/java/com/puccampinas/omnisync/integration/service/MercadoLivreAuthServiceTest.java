@@ -24,7 +24,9 @@ class MercadoLivreAuthServiceTest {
             repository,
             mock(SystemClientService.class),
             mock(UserService.class),
-            mock(TextEncryptor.class)
+            mock(TextEncryptor.class),
+            mock(com.puccampinas.omnisync.core.audit.AuditService.class),
+            mock(com.puccampinas.omnisync.core.users.repository.UserRepository.class)
     );
 
     @Test

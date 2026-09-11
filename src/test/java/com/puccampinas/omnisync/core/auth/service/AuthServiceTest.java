@@ -66,7 +66,7 @@ class AuthServiceTest {
         authService = new AuthService(
                 userRepository, tenantRoleRepository, passwordEncoder, jwtService, passwordResetTokenRepository,
                 passwordResetEmailService, "https://frontend.example/reset-password",
-                authenticationManager, userDetailsService
+                authenticationManager, userDetailsService, mock(com.puccampinas.omnisync.core.audit.AuditService.class)
         );
     }
 

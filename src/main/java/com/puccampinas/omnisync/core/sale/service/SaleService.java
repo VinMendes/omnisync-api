@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.sale.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
@@ -29,13 +31,15 @@ public class SaleService {
     private final ProductRepository productRepository;
     private final SaleLogService saleLogService;
     private final MercadoLivreListingService mercadoLivreListingService;
+    private final AuditService audit;
 
-    public SaleService(SaleRepository saleRepository, SaleLogRepository saleLogRepository, ProductRepository productRepository, SaleLogService saleLogService, MercadoLivreListingService mercadoLivreListingService) {
+    public SaleService(SaleRepository saleRepository, SaleLogRepository saleLogRepository, ProductRepository productRepository, SaleLogService saleLogService, MercadoLivreListingService mercadoLivreListingService, AuditService audit) {
         this.saleRepository = saleRepository;
         this.saleLogRepository = saleLogRepository;
         this.productRepository = productRepository;
         this.saleLogService = saleLogService;
         this.mercadoLivreListingService = mercadoLivreListingService;
+        this.audit = audit;
     }
 
     @Transactional
@@ -99,6 +103,8 @@ public class SaleService {
         Sale savedSale = saleRepository.save(sale);
 
         saleLogService.logCreated(savedSale, null);
+        audit.record(systemClientId, AuditAction.CREATE, AuditEntityType.SALE, savedSale.getId(),
+                null, AuditSnapshots.sale(savedSale), AuditSource.WEB);
 
         return toDto(savedSale, false);
     }

@@ -45,7 +45,8 @@ class SaleServiceTest {
         productRepository = mock(ProductRepository.class);
         saleLogService = mock(SaleLogService.class);
         mercadoLivreListingService = mock(MercadoLivreListingService.class);
-        saleService = new SaleService(saleRepository, saleLogRepository, productRepository, saleLogService, mercadoLivreListingService);
+        saleService = new SaleService(saleRepository, saleLogRepository, productRepository, saleLogService, mercadoLivreListingService,
+                mock(com.puccampinas.omnisync.core.audit.AuditService.class));
     }
 
     @Test

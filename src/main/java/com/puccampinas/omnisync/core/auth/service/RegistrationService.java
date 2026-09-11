@@ -38,7 +38,7 @@ public class RegistrationService {
         SystemClient company = clients.create(companyRequest);
 
         // A empresa é sempre recém-criada; o papel do primeiro usuário é definido pelo servidor.
-        return authService.register(new RegisterRequest(
+        return authService.registerInitialUser(new RegisterRequest(
                 company.getId(), request.name(), request.email(), request.password(),
                 UserResource.create(request.resource()).toStoredJson(), Role.ADMIN.name(),
                 Permission.names(Role.ADMIN.defaultPermissions())

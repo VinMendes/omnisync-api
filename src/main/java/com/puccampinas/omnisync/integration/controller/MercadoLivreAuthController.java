@@ -98,4 +98,12 @@ public class MercadoLivreAuthController {
         Long systemClientId = service.handleCallback(state, code);
         return ResponseEntity.ok("Mercado Livre integration successful for systemClientId=" + systemClientId);
     }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/disconnect")
+    @PreAuthorize(HAS_INTEGRATION_MANAGE)
+    public ResponseEntity<Void> disconnect(@RequestParam Long systemClientId) {
+        access.requireTenant(systemClientId);
+        service.disconnect(systemClientId);
+        return ResponseEntity.noContent().build();
+    }
 }

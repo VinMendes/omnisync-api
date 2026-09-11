@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.integration.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.common.exception.ExternalApiException;
 import com.puccampinas.omnisync.core.product.entity.Product;
@@ -32,15 +34,18 @@ public class MercadoLivreListingService {
     private final MercadoLivreClient mercadoLivreClient;
     private final MarketplaceTokenService marketplaceTokenService;
     private final ProductRepository productRepository;
+    private final AuditService audit;
 
     public MercadoLivreListingService(
             MercadoLivreClient mercadoLivreClient,
             MarketplaceTokenService marketplaceTokenService,
-            ProductRepository productRepository
+            ProductRepository productRepository,
+            AuditService audit
     ) {
         this.mercadoLivreClient = mercadoLivreClient;
         this.marketplaceTokenService = marketplaceTokenService;
         this.productRepository = productRepository;
+        this.audit = audit;
     }
 
     @Transactional
@@ -55,6 +60,8 @@ public class MercadoLivreListingService {
         String itemId = extractRequiredString(createdItem, "id", "Mercado Livre did not return the created item id.");
         upsertDescription(accessToken, itemId, product.getDescription());
         persistMercadoLivreResource(product, createdItem);
+        audit.record(systemClientId, AuditAction.PUBLISH, AuditEntityType.LISTING, itemId,
+                null, AuditSnapshots.fields("product_id", product.getId(), "status", "published"), AuditSource.WEB);
 
         return createdItem;
     }
@@ -92,6 +99,9 @@ public class MercadoLivreListingService {
 
         Map<String, Object> deletedItem = markItemAsDeleted(accessToken, itemId);
         persistMercadoLivreResource(product, deletedItem);
+        audit.record(systemClientId, AuditAction.CLOSE, AuditEntityType.LISTING, itemId,
+                listingSnapshot(currentItem), AuditSnapshots.fields("status", "closed", "product_id", product.getId()),
+                AuditSource.WEB);
         return deletedItem;
     }
 
@@ -111,7 +121,17 @@ public class MercadoLivreListingService {
         productRepository.findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(systemClientId, itemId)
                 .ifPresent(product -> persistMercadoLivreResource(product, deletedItem));
 
+        audit.record(systemClientId, AuditAction.CLOSE, AuditEntityType.LISTING, itemId,
+                listingSnapshot(currentItem), AuditSnapshots.fields("status", "closed"), AuditSource.WEB);
+
         return deletedItem;
+    }
+
+    private Map<String, Object> listingSnapshot(Map<String, Object> item) {
+        // Provider responses may contain arbitrary values; only known status strings are retained.
+        Object status = item.get("status");
+        return AuditSnapshots.fields("status", status instanceof String text
+                && java.util.Set.of("active", "paused", "closed", "under_review", "inactive").contains(text) ? text : null);
     }
 
     public Map<String, Object> listListings(

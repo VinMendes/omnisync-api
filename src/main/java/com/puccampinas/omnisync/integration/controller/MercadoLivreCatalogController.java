@@ -91,12 +91,19 @@ public class MercadoLivreCatalogController {
     @PreAuthorize(HAS_INTEGRATION_MANAGE)
     public ResponseEntity<MercadoLivreSyncResponse> syncSellerListings(
             Authentication authentication,
-            @PathVariable Long systemClientId
+            @PathVariable Long systemClientId,
+            @RequestParam(defaultValue = "WEB") com.puccampinas.omnisync.core.audit.AuditSource source
     ) {
         access.requireTenant(systemClientId);
         access.requirePermission(Permission.PRODUCT_WRITE);
+        if (source != com.puccampinas.omnisync.core.audit.AuditSource.WEB
+                && source != com.puccampinas.omnisync.core.audit.AuditSource.MANUAL
+                && source != com.puccampinas.omnisync.core.audit.AuditSource.AUTOMATIC)
+            throw new IllegalArgumentException("source deve ser WEB, MANUAL ou AUTOMATIC.");
         return ResponseEntity.ok(
-                productService.syncMercadoLivreProducts(authentication.getName(), systemClientId)
+                source == com.puccampinas.omnisync.core.audit.AuditSource.WEB
+                        ? productService.syncMercadoLivreProducts(authentication.getName(), systemClientId)
+                        : productService.syncMercadoLivreProducts(authentication.getName(), systemClientId, source)
         );
     }
 }

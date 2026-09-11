@@ -41,6 +41,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc(addFilters = false)
 @Import(UserService.class)
 class UserTenantIsolationIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    private com.puccampinas.omnisync.core.audit.AuditService audit;
 
     @MockitoBean
     private RegistrationService registrationService;

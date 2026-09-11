@@ -80,6 +80,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.cors.allowed-origins=http://localhost:5173"
 })
 class AuthFlowIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    private com.puccampinas.omnisync.core.audit.AuditService audit;
 
     @MockitoBean
     private RegistrationService registrationService;
@@ -158,7 +160,7 @@ class AuthFlowIntegrationTest {
                 .andExpect(jsonPath("$.role").value("ADMIN"))
                 .andExpect(jsonPath("$.permissions", containsInAnyOrder(
                         "PRODUCT_READ", "PRODUCT_WRITE", "LISTING_PUBLISH", "SALE_READ", "SALE_WRITE",
-                        "USER_MANAGE", "INTEGRATION_MANAGE", "SETTINGS_MANAGE")))
+                        "USER_MANAGE", "INTEGRATION_MANAGE", "SETTINGS_MANAGE", "AUDIT_READ")))
                 .andExpect(jsonPath("$.passwordHash").doesNotExist());
         mvc.perform(get("/test/auth-identity").header(HttpHeaders.AUTHORIZATION, "Bearer " + access.getValue()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.username").value(EMAIL))

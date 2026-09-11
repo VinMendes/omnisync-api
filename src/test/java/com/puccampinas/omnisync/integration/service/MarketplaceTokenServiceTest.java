@@ -34,7 +34,7 @@ class MarketplaceTokenServiceTest {
         repository = mock(MarketplaceIntegrationRepository.class);
         client = mock(MercadoLivreClient.class);
         encryptor = mock(TextEncryptor.class);
-        service = new MarketplaceTokenService(repository, client, encryptor);
+        service = new MarketplaceTokenService(repository, client, encryptor, mock(com.puccampinas.omnisync.core.audit.AuditService.class));
         integration = new MarketplaceIntegration();
         integration.setId(10L);
         integration.setSystemClientId(7L);

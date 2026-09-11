@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.product.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
@@ -46,6 +48,7 @@ public class ProductService {
     private final UserService userService;
     private final SystemClientService systemClientService;
     private final MercadoLivreSyncLockRepository syncLockRepository;
+    private final AuditService audit;
 
     public ProductService(
             ProductRepository productRepository,
@@ -54,7 +57,8 @@ public class ProductService {
             MarketplaceIntegrationRepository marketplaceIntegrationRepository,
             UserService userService,
             SystemClientService systemClientService,
-            MercadoLivreSyncLockRepository syncLockRepository
+            MercadoLivreSyncLockRepository syncLockRepository,
+            AuditService audit
     ) {
         this.productRepository = productRepository;
         this.productLogService = productLogService;
@@ -63,6 +67,7 @@ public class ProductService {
         this.userService = userService;
         this.systemClientService = systemClientService;
         this.syncLockRepository = syncLockRepository;
+        this.audit = audit;
     }
 
     @Transactional
@@ -87,6 +92,8 @@ public class ProductService {
         }
 
         this.productLogService.logCreate(savedProduct);
+        audit.record(systemClientId, AuditAction.CREATE, AuditEntityType.PRODUCT, savedProduct.getId(),
+                null, AuditSnapshots.product(savedProduct), AuditSource.WEB);
 
         return toDto(savedProduct);
     }
@@ -168,6 +175,8 @@ public class ProductService {
         }
 
         this.productLogService.logEdit(previousState, updatedProduct);
+        audit.record(systemClientId, AuditAction.UPDATE, AuditEntityType.PRODUCT, updatedProduct.getId(),
+                AuditSnapshots.product(previousState), AuditSnapshots.product(updatedProduct), AuditSource.WEB);
 
         return toDto(updatedProduct);
     }
@@ -187,6 +196,8 @@ public class ProductService {
         }
 
         this.productLogService.logDelete(previousState, deletedProduct);
+        audit.record(systemClientId, AuditAction.DELETE, AuditEntityType.PRODUCT, deletedProduct.getId(),
+                AuditSnapshots.product(previousState), AuditSnapshots.product(deletedProduct), AuditSource.WEB);
 
         return toDto(deletedProduct);
     }
@@ -196,6 +207,14 @@ public class ProductService {
             noRollbackFor = MercadoLivreSyncException.class
     )
     public MercadoLivreSyncResponse syncMercadoLivreProducts(String authenticatedEmail, Long systemClientId) {
+        return syncMercadoLivreProducts(authenticatedEmail, systemClientId, AuditSource.WEB);
+    }
+
+    @Transactional(
+            timeoutString = "${mercadolivre.sync.transaction-timeout-seconds:300}",
+            noRollbackFor = MercadoLivreSyncException.class
+    )
+    public MercadoLivreSyncResponse syncMercadoLivreProducts(String authenticatedEmail, Long systemClientId, AuditSource source) {
         validateAuthenticatedEmail(authenticatedEmail);
         validateSystemClientId(systemClientId);
 
@@ -223,6 +242,7 @@ public class ProductService {
                 ));
 
         extractMarketplaceSellerUserId(integration);
+        var beforeSync = AuditSnapshots.integration(integration);
         Map<String, Object> listings = mercadoLivreListingService.listAllClientListings(systemClientId);
         List<Map<String, Object>> items = extractMercadoLivreItems(listings.get("items"));
         validateRemoteItemIdentities(items);
@@ -231,7 +251,7 @@ public class ProductService {
         int created = 0;
         int updated = 0;
         for (Map<String, Object> item : items) {
-            ProductSyncOutcome outcome = syncMercadoLivreItem(systemClientId, item);
+            ProductSyncOutcome outcome = syncMercadoLivreItem(systemClientId, item, source);
             syncedItemIds.add(outcome.itemId());
 
             if (outcome.created()) {
@@ -244,11 +264,14 @@ public class ProductService {
 
         }
 
-        deactivateMissingMercadoLivreProducts(systemClientId, syncedItemIds);
+        deactivateMissingMercadoLivreProducts(systemClientId, syncedItemIds, source);
 
         Instant completedAt = Instant.now();
         integration.setLastSyncAt(completedAt);
         marketplaceIntegrationRepository.saveAndFlush(integration);
+        audit.recordForUser(authenticatedUser, AuditAction.SYNC, AuditEntityType.INTEGRATION,
+                integration.getId(), beforeSync, AuditSnapshots.integration(integration), source,
+                AuditSnapshots.fields("created_products", created, "updated_products", updated));
 
         MercadoLivreSyncResponse response = new MercadoLivreSyncResponse();
         response.setMessage("Anúncios do Mercado Livre sincronizados com sucesso.");
@@ -506,7 +529,7 @@ public class ProductService {
         return copy;
     }
 
-    private ProductSyncOutcome syncMercadoLivreItem(Long systemClientId, Map<String, Object> rawItem) {
+    private ProductSyncOutcome syncMercadoLivreItem(Long systemClientId, Map<String, Object> rawItem, AuditSource source) {
         Map<String, Object> item = normalizeMercadoLivreItem(rawItem);
         String itemId = requiredString(item, "id", "Mercado Livre item id is required during sync.");
         String requestedSku = resolveMercadoLivreSku(item, itemId);
@@ -537,11 +560,15 @@ public class ProductService {
 
         if (created) {
             productLogService.logCreate(saved);
+            audit.record(systemClientId, AuditAction.CREATE, AuditEntityType.PRODUCT, saved.getId(),
+                    null, AuditSnapshots.product(saved), source);
             return new ProductSyncOutcome(itemId, true, false, false);
         }
 
         if (reactivated || hasProductChanged(previousState, saved)) {
             productLogService.logEdit(previousState, saved);
+            audit.record(systemClientId, AuditAction.UPDATE, AuditEntityType.PRODUCT, saved.getId(),
+                    AuditSnapshots.product(previousState), AuditSnapshots.product(saved), source);
             return new ProductSyncOutcome(itemId, false, true, reactivated);
         }
 
@@ -595,7 +622,7 @@ public class ProductService {
         }
     }
 
-    private int deactivateMissingMercadoLivreProducts(Long systemClientId, Set<String> syncedItemIds) {
+    private int deactivateMissingMercadoLivreProducts(Long systemClientId, Set<String> syncedItemIds, AuditSource source) {
         List<Product> mercadoLivreProducts = productRepository.findAllMercadoLivreProductsBySystemClientId(systemClientId);
         int deactivated = 0;
 
@@ -609,6 +636,8 @@ public class ProductService {
             product.setActive(false);
             Product saved = productRepository.save(product);
             productLogService.logDelete(previousState, saved);
+            audit.record(systemClientId, AuditAction.DELETE, AuditEntityType.PRODUCT, saved.getId(),
+                    AuditSnapshots.product(previousState), AuditSnapshots.product(saved), source);
             deactivated++;
         }
 

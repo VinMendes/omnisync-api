@@ -15,6 +15,7 @@ public final class PermissionAuthority {
     public static final String USER_MANAGE = PREFIX + "USER_MANAGE";
     public static final String INTEGRATION_MANAGE = PREFIX + "INTEGRATION_MANAGE";
     public static final String SETTINGS_MANAGE = PREFIX + "SETTINGS_MANAGE";
+    public static final String AUDIT_READ = PREFIX + "AUDIT_READ";
 
     public static final String HAS_PRODUCT_READ = "hasAuthority('" + PRODUCT_READ + "')";
     public static final String HAS_PRODUCT_WRITE = "hasAuthority('" + PRODUCT_WRITE + "')";

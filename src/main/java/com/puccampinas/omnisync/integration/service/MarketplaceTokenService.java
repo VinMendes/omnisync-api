@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.integration.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.integration.client.MercadoLivreClient;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreTokenResponse;
@@ -24,15 +26,18 @@ public class MarketplaceTokenService {
     private final MarketplaceIntegrationRepository repository;
     private final MercadoLivreClient mercadoLivreClient;
     private final TextEncryptor encryptor;
+    private final AuditService audit;
 
     public MarketplaceTokenService(
             MarketplaceIntegrationRepository repository,
             MercadoLivreClient mercadoLivreClient,
-            TextEncryptor encryptor
+            TextEncryptor encryptor,
+            AuditService audit
     ) {
         this.repository = repository;
         this.mercadoLivreClient = mercadoLivreClient;
         this.encryptor = encryptor;
+        this.audit = audit;
     }
 
     @Transactional(noRollbackFor = MercadoLivreSyncException.class)
@@ -119,8 +124,12 @@ public class MarketplaceTokenService {
             MarketplaceIntegration integration,
             Throwable cause
     ) {
+        var before = AuditSnapshots.integration(integration);
         integration.setActive(false);
         repository.saveAndFlush(integration);
+        audit.recordAs(AuditActor.system(integration.getSystemClientId()), AuditAction.DISCONNECT,
+                AuditEntityType.INTEGRATION, integration.getId(), before, AuditSnapshots.integration(integration),
+                AuditSource.SYSTEM, java.util.Map.of("reason", "REAUTH_REQUIRED"));
         LOGGER.warn("event=ml_reauth_required systemClientId={}", integration.getSystemClientId());
         throw MercadoLivreSyncException.reauthRequired(cause);
     }

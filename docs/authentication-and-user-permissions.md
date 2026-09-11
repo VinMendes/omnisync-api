@@ -60,10 +60,13 @@ exige `USER_MANAGE`, sempre dentro da empresa autenticada.
 | `USER_MANAGE` | Sim | — | — | — |
 | `INTEGRATION_MANAGE` | Sim | — | — | — |
 | `SETTINGS_MANAGE` | Sim | — | — | — |
+| `AUDIT_READ` | Sim | — | — | — |
 
 As authorities são `ROLE_ADMIN`/`ROLE_MANAGER`/`ROLE_SELLER`/`ROLE_VIEWER` mais
 `PERM_<CÓDIGO>`, por exemplo `PERM_PRODUCT_WRITE`. Os endpoints usam as permissões
-persistidas, sem um bypass automático para o nome `ADMIN`.
+persistidas, sem um bypass geral para o nome `ADMIN`. A consulta de auditoria é a
+exceção definida pelo seu card: aceita `ADMIN` ou `AUDIT_READ`, sempre na mesma empresa.
+Roles existentes não recebem permissões novas automaticamente.
 
 ## Rotas e autorização
 

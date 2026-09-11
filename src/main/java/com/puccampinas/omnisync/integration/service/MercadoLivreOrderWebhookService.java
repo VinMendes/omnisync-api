@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.integration.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
@@ -36,6 +38,7 @@ public class MercadoLivreOrderWebhookService {
     private final ProductRepository productRepository;
     private final SaleRepository saleRepository;
     private final SaleLogService saleLogService;
+    private final AuditService audit;
 
     public MercadoLivreOrderWebhookService(
             MarketplaceIntegrationRepository marketplaceIntegrationRepository,
@@ -43,7 +46,8 @@ public class MercadoLivreOrderWebhookService {
             MercadoLivreClient mercadoLivreClient,
             ProductRepository productRepository,
             SaleRepository saleRepository,
-            SaleLogService saleLogService
+            SaleLogService saleLogService,
+            AuditService audit
     ) {
         this.marketplaceIntegrationRepository = marketplaceIntegrationRepository;
         this.marketplaceTokenService = marketplaceTokenService;
@@ -51,6 +55,7 @@ public class MercadoLivreOrderWebhookService {
         this.productRepository = productRepository;
         this.saleRepository = saleRepository;
         this.saleLogService = saleLogService;
+        this.audit = audit;
     }
 
     @Transactional
@@ -149,6 +154,9 @@ public class MercadoLivreOrderWebhookService {
         metadata.put("stock_delta", stockDelta);
         metadata.put("stock_inconsistency", newStock < 0);
         saleLogService.logCreated(savedSale, metadata);
+        audit.recordAs(AuditActor.system(product.getSystemClientId()), AuditAction.CREATE, AuditEntityType.SALE,
+                savedSale.getId(), null, AuditSnapshots.sale(savedSale), AuditSource.WEBHOOK,
+                AuditSnapshots.fields("previous_stock", previousStock, "new_stock", newStock));
 
         return buildResult(savedSale, product, stockDelta != 0, orderId, context.itemId());
     }
@@ -163,6 +171,7 @@ public class MercadoLivreOrderWebhookService {
             OrderLineContext context
     ) {
         String previousStatus = sale.getStatus();
+        var before = AuditSnapshots.sale(sale);
         int previousStock = product.getStock();
         int previousCommittedQuantity = committedQuantity(previousStatus, sale.getQuantity());
         int currentCommittedQuantity = committedQuantity(normalizedStatus, context.quantity());
@@ -200,6 +209,12 @@ public class MercadoLivreOrderWebhookService {
             saleLogService.logUpdated(savedSale, previousStatus, metadata);
         }
 
+        var after = AuditSnapshots.sale(savedSale);
+        if (!before.equals(after)) {
+            audit.recordAs(AuditActor.system(product.getSystemClientId()), AuditAction.UPDATE, AuditEntityType.SALE,
+                    savedSale.getId(), before, after, AuditSource.WEBHOOK,
+                    AuditSnapshots.fields("previous_stock", previousStock, "new_stock", newStock));
+        }
         return buildResult(savedSale, product, committedDelta != 0, orderId, context.itemId());
     }
 

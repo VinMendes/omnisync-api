@@ -78,7 +78,8 @@ class MercadoLivreSyncLoggingTest {
                 integrationRepository,
                 userService,
                 systemClientService,
-                lockRepository
+                lockRepository,
+                mock(com.puccampinas.omnisync.core.audit.AuditService.class)
         );
 
         private Fixture() {

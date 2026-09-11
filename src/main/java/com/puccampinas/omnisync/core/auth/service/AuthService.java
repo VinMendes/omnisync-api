@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.auth.service;
 
+import com.puccampinas.omnisync.core.audit.AuditService;
+
 import com.puccampinas.omnisync.core.auth.dto.AuthResponse;
 import com.puccampinas.omnisync.core.auth.dto.ForgotPasswordRequest;
 import com.puccampinas.omnisync.core.auth.dto.LoginRequest;
@@ -104,7 +106,8 @@ public class AuthService {
                        PasswordResetEmailService passwordResetEmailService,
                        @Value("${app.frontend.reset-password-url}") String resetPasswordUrl,
                        AuthenticationManager authenticationManager,
-                       CustomUserDetailsService userDetailsService) {
+                       CustomUserDetailsService userDetailsService,
+                       AuditService audit) {
         this.userRepository = userRepository;
         this.tenantRoleRepository = tenantRoleRepository;
         this.passwordEncoder = passwordEncoder;
@@ -114,7 +117,10 @@ public class AuthService {
         this.resetPasswordUrl = resetPasswordUrl;
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
+        this.audit = audit;
     }
+
+    private final AuditService audit;
 
     /**
      * Registra um novo usuário no sistema.
@@ -125,6 +131,16 @@ public class AuthService {
      */
     @Transactional
     public User register(RegisterRequest req) {
+        return createUser(req, false);
+    }
+
+    /** Used only by atomic company signup, whose first user is chosen by the server. */
+    @Transactional
+    public User registerInitialUser(RegisterRequest req) {
+        return createUser(req, true);
+    }
+
+    private User createUser(RegisterRequest req, boolean initialUser) {
         UserAccess access = UserAccess.forCreate(req.resource(), req.role(), req.permissions());
         String normalizedEmail = normalizeEmail(req.email());
 
@@ -148,7 +164,13 @@ public class AuthService {
         user.setResource(resource);
         user.setTenantRole(tenantRole);
 
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        if (initialUser) {
+            audit.initialUserCreated(saved);
+        } else {
+            audit.userCreated(saved);
+        }
+        return saved;
     }
 
     /**
@@ -287,6 +309,7 @@ public class AuthService {
         resetToken.setUsed(true);
         resetToken.setUsedAt(Instant.now());
         passwordResetTokenRepository.save(resetToken);
+        audit.credentialChanged(user);
     }
 
     /**

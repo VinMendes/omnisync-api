@@ -72,7 +72,8 @@ class ProductServiceTest {
                 marketplaceIntegrationRepository,
                 userService, 
                 systemClientService,
-                syncLockRepository
+                syncLockRepository,
+                mock(com.puccampinas.omnisync.core.audit.AuditService.class)
         );
         reset(productRepository, productLogService, mercadoLivreListingService, marketplaceIntegrationRepository, userService, systemClientService);
         when(syncLockRepository.tryAcquire(any(Long.class))).thenReturn(true);

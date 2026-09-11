@@ -52,7 +52,7 @@ role_problems AS (
            WHERE jsonb_typeof(entry.value) <> 'string'
               OR entry.value #>> '{}' NOT IN (
                   'PRODUCT_READ', 'PRODUCT_WRITE', 'LISTING_PUBLISH', 'SALE_READ', 'SALE_WRITE',
-                  'USER_MANAGE', 'INTEGRATION_MANAGE', 'SETTINGS_MANAGE'
+                  'USER_MANAGE', 'INTEGRATION_MANAGE', 'SETTINGS_MANAGE', 'AUDIT_READ'
               )
        )
 )

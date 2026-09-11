@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.users.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.core.users.dto.UserResponse;
 import com.puccampinas.omnisync.core.users.dto.UserStatusUpdateRequest;
 import com.puccampinas.omnisync.core.users.dto.UserUpdateRequest;
@@ -26,10 +28,12 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final TenantRoleRepository tenantRoleRepository;
+    private final AuditService audit;
 
-    public UserService(UserRepository userRepository, TenantRoleRepository tenantRoleRepository) {
+    public UserService(UserRepository userRepository, TenantRoleRepository tenantRoleRepository, AuditService audit) {
         this.userRepository = userRepository;
         this.tenantRoleRepository = tenantRoleRepository;
+        this.audit = audit;
     }
 
     public UserResponse findMe(String email) {
@@ -70,6 +74,7 @@ public class UserService {
         User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
         User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
         TenantRole currentRole = requireRole(user);
+        var before = AuditSnapshots.user(user);
         UserAccess access = UserAccess.forUpdate(
                 request.resource(), request.role(), request.permissions(), currentRole.getName());
         Set<Permission> selectedPermissions = access.effectivePermissions(currentRole);
@@ -117,9 +122,12 @@ public class UserService {
         user.setResource(updatedResource);
 
         User savedUser = userRepository.save(user);
+        audit.record(user.getSystemClientId(), AuditAction.UPDATE, AuditEntityType.USER, user.getId(),
+                before, AuditSnapshots.user(savedUser), AuditSource.WEB);
         return toResponse(savedUser);
     }
 
+    @Transactional
     public UserResponse updateStatus(String authenticatedEmail, Long id, UserStatusUpdateRequest request) {
         User authenticatedUser = findActiveEntityByEmail(authenticatedEmail);
         User user = findUserEntityByIdAndSystemClientId(id, authenticatedUser.getSystemClientId());
@@ -132,9 +140,15 @@ public class UserService {
             throw new AccessDeniedException("Não é permitido desativar o próprio usuário.");
         }
 
+        var before = AuditSnapshots.user(user);
+        boolean changed = !Objects.equals(user.getActive(), request.active());
         user.setActive(request.active());
 
         User savedUser = userRepository.save(user);
+        if (changed) {
+            audit.record(user.getSystemClientId(), request.active() ? AuditAction.ACTIVATE : AuditAction.DEACTIVATE,
+                    AuditEntityType.USER, user.getId(), before, AuditSnapshots.user(savedUser), AuditSource.WEB);
+        }
         return toResponse(savedUser);
     }
 

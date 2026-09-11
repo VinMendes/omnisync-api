@@ -47,10 +47,12 @@ class UserResourceMigrationTest {
                     "{\"role\":\"viewer\"}", 2026);
 
             Flyway flyway = Flyway.configure().dataSource(dataSource).load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(7);
 
             assertThat(roleOf(jdbc, 38L)).isEqualTo(Role.ADMIN);
-            assertThat(permissionsOf(jdbc, 38L)).containsExactlyInAnyOrder(Permission.values());
+            // V13 does not silently grant new permissions to existing customized roles.
+            assertThat(permissionsOf(jdbc, 38L)).containsExactlyInAnyOrder(
+                    java.util.Arrays.stream(Permission.values()).filter(p -> p != Permission.AUDIT_READ).toArray(Permission[]::new));
             assertThat(userResource(jdbc, 38L).attributes())
                     .containsExactlyEntriesOf(Map.of("cpf", "00000000000"));
 
@@ -115,7 +117,7 @@ class UserResourceMigrationTest {
             jdbc.update("UPDATE users SET resource = ?::jsonb WHERE id = 52",
                     "{\"role\":\"editor\",\"permissions\":[\"SALE_READ\",\"SALE_WRITE\"],\"theme\":\"dark\"}");
 
-            assertThat(Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted).isEqualTo(4);
+            assertThat(Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted).isEqualTo(6);
             assertThat(roleOf(jdbc, 51L)).isEqualTo(Role.SELLER);
             assertThat(roleOf(jdbc, 52L)).isEqualTo(Role.SELLER);
             assertThat(roleIdOf(jdbc, 51L)).isNotEqualTo(roleIdOf(jdbc, 52L));

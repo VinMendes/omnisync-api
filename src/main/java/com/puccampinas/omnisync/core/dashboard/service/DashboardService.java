@@ -1,5 +1,6 @@
 package com.puccampinas.omnisync.core.dashboard.service;
 
+import com.puccampinas.omnisync.config.security.PermissionAuthority;
 import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
 import com.puccampinas.omnisync.core.dashboard.dto.DashboardSalesDay;
 import com.puccampinas.omnisync.core.dashboard.dto.DashboardSummary;
@@ -92,7 +93,8 @@ public class DashboardService {
         }
 
         List<String> authorities = principal.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
-        if (!authorities.contains("PRODUCT_READ") || !authorities.contains("SALE_READ")) {
+        if (!authorities.contains(PermissionAuthority.PRODUCT_READ)
+                || !authorities.contains(PermissionAuthority.SALE_READ)) {
             throw new AccessDeniedException("PRODUCT_READ and SALE_READ permissions are required.");
         }
     }

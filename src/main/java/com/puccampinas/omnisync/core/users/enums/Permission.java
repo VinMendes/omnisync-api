@@ -19,7 +19,8 @@ public enum Permission {
     SALE_WRITE,
     USER_MANAGE,
     INTEGRATION_MANAGE,
-    SETTINGS_MANAGE;
+    SETTINGS_MANAGE,
+    AUDIT_READ;
 
     private static final Map<String, Set<Permission>> LEGACY_ALIASES = Map.ofEntries(
             Map.entry("acesso total", Set.copyOf(EnumSet.allOf(Permission.class))),

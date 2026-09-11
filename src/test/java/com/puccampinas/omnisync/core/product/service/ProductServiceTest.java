@@ -12,6 +12,7 @@ import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
+import com.puccampinas.omnisync.integration.repository.MercadoLivreSyncLockRepository;
 import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +27,9 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,6 +43,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ProductServiceTest {
@@ -53,6 +58,7 @@ class ProductServiceTest {
     private UserService userService;
     private ProductService productService;
     private SystemClientService systemClientService;
+    private MercadoLivreSyncLockRepository syncLockRepository;
 
     @BeforeEach
     void setUp() {
@@ -62,15 +68,19 @@ class ProductServiceTest {
         marketplaceIntegrationRepository = mock(MarketplaceIntegrationRepository.class);
         systemClientService = mock(SystemClientService.class);
         userService = mock(UserService.class);
+        syncLockRepository = mock(MercadoLivreSyncLockRepository.class);
         productService = new ProductService(
                 productRepository,
                 productLogService,
                 mercadoLivreListingService,
                 marketplaceIntegrationRepository,
                 userService, 
-                systemClientService
+                systemClientService,
+                syncLockRepository,
+                mock(com.puccampinas.omnisync.core.audit.AuditService.class)
         );
         reset(productRepository, productLogService, mercadoLivreListingService, marketplaceIntegrationRepository, userService, systemClientService);
+        when(syncLockRepository.tryAcquire(any(Long.class))).thenReturn(true);
     }
 
     @Test
@@ -134,7 +144,7 @@ class ProductServiceTest {
                 .thenReturn(new PageImpl<>(List.of(product)));
 
         LowStockProductsResponse result = productService.getLowStock(
-                1L, OFFSET, LIMIT, principal(1L, "PRODUCT_READ")
+                1L, OFFSET, LIMIT, principal(1L, "PERM_PRODUCT_READ")
         );
 
         assertEquals(1, result.totalElements());
@@ -152,7 +162,7 @@ class ProductServiceTest {
     void getLowStockShouldRejectAnotherTenant() {
         assertThrows(
                 EntityNotFoundException.class,
-                () -> productService.getLowStock(1L, OFFSET, LIMIT, principal(2L, "PRODUCT_READ"))
+                () -> productService.getLowStock(1L, OFFSET, LIMIT, principal(2L, "PERM_PRODUCT_READ"))
         );
 
         verifyNoInteractions(productRepository);
@@ -162,7 +172,7 @@ class ProductServiceTest {
     void getLowStockShouldRequireProductReadPermission() {
         assertThrows(
                 AccessDeniedException.class,
-                () -> productService.getLowStock(1L, OFFSET, LIMIT, principal(1L, "SALE_READ"))
+                () -> productService.getLowStock(1L, OFFSET, LIMIT, principal(1L, "PERM_SALE_READ"))
         );
 
         verifyNoInteractions(productRepository);
@@ -454,12 +464,122 @@ class ProductServiceTest {
 
         assertEquals("Anúncios do Mercado Livre sincronizados com sucesso.", response.getMessage());
         assertEquals(2, response.getSyncedProducts());
+        assertEquals(1, response.getCreatedProducts());
+        assertEquals(1, response.getUpdatedProducts());
+        assertNotNull(response.getLastSyncAt());
         assertTrue(inactiveProduct.getActive());
         assertFalse(staleMercadoLivreProduct.getActive());
         assertTrue(nonMercadoLivreProduct.getActive());
         verify(productLogService).logCreate(any(Product.class));
         verify(productLogService).logEdit(any(Product.class), any(Product.class));
         verify(productLogService).logDelete(any(Product.class), any(Product.class));
+        verify(marketplaceIntegrationRepository).saveAndFlush(integration);
+    }
+
+    @Test
+    void syncMercadoLivreProductsShouldReturnInProgressWithoutCallingProviderWhenLockIsBusy() {
+        User authenticatedUser = new User();
+        authenticatedUser.setSystemClientId(1L);
+        when(userService.findActiveEntityByEmail("user@test.com")).thenReturn(authenticatedUser);
+        when(syncLockRepository.tryAcquire(1L)).thenReturn(false);
+
+        var error = assertThrows(
+                com.puccampinas.omnisync.integration.exception.MercadoLivreSyncException.class,
+                () -> productService.syncMercadoLivreProducts("user@test.com", 1L)
+        );
+
+        assertEquals("ML_SYNC_IN_PROGRESS", error.getCode());
+        verify(mercadoLivreListingService, never()).listAllClientListings(any(Long.class));
+    }
+
+    @Test
+    void syncMercadoLivreProductsRejectsDuplicateRemoteIdentityBeforePersistence() {
+        User authenticatedUser = new User();
+        authenticatedUser.setSystemClientId(1L);
+        MarketplaceIntegration integration = new MarketplaceIntegration();
+        integration.setResource(Map.of("user_id", "123"));
+        when(userService.findActiveEntityByEmail("user@test.com")).thenReturn(authenticatedUser);
+        when(marketplaceIntegrationRepository.findMercadoLivreActiveIntegrationForSync(1L, "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(mercadoLivreListingService.listAllClientListings(1L)).thenReturn(Map.of(
+                "items", List.of(
+                        Map.of("body", mercadolivreItem("MLB1", "SKU-1", "One")),
+                        Map.of("body", mercadolivreItem("MLB1", "SKU-2", "Duplicate"))
+                )
+        ));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> productService.syncMercadoLivreProducts("user@test.com", 1L)
+        );
+        verify(productRepository, never()).save(any(Product.class));
+        verify(marketplaceIntegrationRepository, never()).saveAndFlush(any(MarketplaceIntegration.class));
+    }
+
+    @Test
+    void syncMercadoLivreProductsHandlesAControlledThousandItemCatalog() {
+        User authenticatedUser = new User();
+        authenticatedUser.setSystemClientId(1L);
+        MarketplaceIntegration integration = new MarketplaceIntegration();
+        integration.setResource(Map.of("user_id", "123"));
+        List<Map<String, Object>> items = IntStream.range(0, 1_000)
+                .mapToObj(index -> Map.<String, Object>of(
+                        "body", mercadolivreItem("MLB" + index, "SKU-" + index, "Product " + index)
+                ))
+                .toList();
+        when(userService.findActiveEntityByEmail("user@test.com")).thenReturn(authenticatedUser);
+        when(marketplaceIntegrationRepository.findMercadoLivreActiveIntegrationForSync(1L, "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(mercadoLivreListingService.listAllClientListings(1L)).thenReturn(Map.of("items", items));
+        AtomicLong ids = new AtomicLong();
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            product.setId(ids.incrementAndGet());
+            return product;
+        });
+
+        MercadoLivreSyncResponse response = productService.syncMercadoLivreProducts("user@test.com", 1L);
+
+        assertEquals(1_000, response.getSyncedProducts());
+        assertEquals(1_000, response.getCreatedProducts());
+        assertEquals(0, response.getUpdatedProducts());
+    }
+
+    @Test
+    void threeSequentialSyncsKeepOneStableProductIdentity() {
+        User authenticatedUser = new User();
+        authenticatedUser.setSystemClientId(1L);
+        MarketplaceIntegration integration = new MarketplaceIntegration();
+        integration.setResource(Map.of("user_id", "123"));
+        AtomicReference<Product> stored = new AtomicReference<>();
+        when(userService.findActiveEntityByEmail("user@test.com")).thenReturn(authenticatedUser);
+        when(marketplaceIntegrationRepository.findMercadoLivreActiveIntegrationForSync(1L, "MERCADO_LIVRE"))
+                .thenReturn(Optional.of(integration));
+        when(mercadoLivreListingService.listAllClientListings(1L)).thenReturn(Map.of(
+                "items", List.of(Map.of("body", mercadolivreItem("MLB-STABLE", "SKU-STABLE", "Stable")))
+        ));
+        when(productRepository.findBySystemClientIdAndMercadoLivreItemId(1L, "MLB-STABLE"))
+                .thenAnswer(invocation -> Optional.ofNullable(stored.get()));
+        when(productRepository.findBySkuAndSystemClientId("SKU-STABLE", 1L))
+                .thenAnswer(invocation -> Optional.ofNullable(stored.get()));
+        when(productRepository.findAllMercadoLivreProductsBySystemClientId(1L))
+                .thenAnswer(invocation -> stored.get() == null ? List.of() : List.of(stored.get()));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            if (product.getId() == null) product.setId(77L);
+            stored.set(product);
+            return product;
+        });
+
+        MercadoLivreSyncResponse first = productService.syncMercadoLivreProducts("user@test.com", 1L);
+        MercadoLivreSyncResponse second = productService.syncMercadoLivreProducts("user@test.com", 1L);
+        MercadoLivreSyncResponse third = productService.syncMercadoLivreProducts("user@test.com", 1L);
+
+        assertEquals(1, first.getCreatedProducts());
+        assertEquals(0, second.getCreatedProducts());
+        assertEquals(1, second.getUpdatedProducts());
+        assertEquals(0, third.getCreatedProducts());
+        assertEquals(77L, stored.get().getId());
     }
 
     @Test

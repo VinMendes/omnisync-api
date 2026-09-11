@@ -1,7 +1,10 @@
 package com.puccampinas.omnisync.core.product.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
+import com.puccampinas.omnisync.config.security.PermissionAuthority;
 import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
 import com.puccampinas.omnisync.core.product.dto.LowStockProductsResponse;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
@@ -14,6 +17,9 @@ import com.puccampinas.omnisync.core.users.service.UserService;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreSyncResponse;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
+import com.puccampinas.omnisync.integration.repository.MercadoLivreSyncLockRepository;
+import com.puccampinas.omnisync.integration.exception.MercadoLivreSyncException;
+import com.puccampinas.omnisync.common.exception.ExternalApiException;
 import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
@@ -21,6 +27,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -31,9 +39,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.time.Instant;
 
 @Service
 public class ProductService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProductService.class);
 
     private final ProductRepository productRepository;
     private final ProductLogService productLogService;
@@ -41,6 +52,8 @@ public class ProductService {
     private final MarketplaceIntegrationRepository marketplaceIntegrationRepository;
     private final UserService userService;
     private final SystemClientService systemClientService;
+    private final MercadoLivreSyncLockRepository syncLockRepository;
+    private final AuditService audit;
 
     public ProductService(
             ProductRepository productRepository,
@@ -48,7 +61,9 @@ public class ProductService {
             MercadoLivreListingService mercadoLivreListingService,
             MarketplaceIntegrationRepository marketplaceIntegrationRepository,
             UserService userService,
-            SystemClientService systemClientService
+            SystemClientService systemClientService,
+            MercadoLivreSyncLockRepository syncLockRepository,
+            AuditService audit
     ) {
         this.productRepository = productRepository;
         this.productLogService = productLogService;
@@ -56,6 +71,8 @@ public class ProductService {
         this.marketplaceIntegrationRepository = marketplaceIntegrationRepository;
         this.userService = userService;
         this.systemClientService = systemClientService;
+        this.syncLockRepository = syncLockRepository;
+        this.audit = audit;
     }
 
     @Transactional
@@ -80,6 +97,8 @@ public class ProductService {
         }
 
         this.productLogService.logCreate(savedProduct);
+        audit.record(systemClientId, AuditAction.CREATE, AuditEntityType.PRODUCT, savedProduct.getId(),
+                null, AuditSnapshots.product(savedProduct), AuditSource.WEB);
 
         return toDto(savedProduct);
     }
@@ -188,6 +207,8 @@ public class ProductService {
         }
 
         this.productLogService.logEdit(previousState, updatedProduct);
+        audit.record(systemClientId, AuditAction.UPDATE, AuditEntityType.PRODUCT, updatedProduct.getId(),
+                AuditSnapshots.product(previousState), AuditSnapshots.product(updatedProduct), AuditSource.WEB);
 
         return toDto(updatedProduct);
     }
@@ -207,12 +228,25 @@ public class ProductService {
         }
 
         this.productLogService.logDelete(previousState, deletedProduct);
+        audit.record(systemClientId, AuditAction.DELETE, AuditEntityType.PRODUCT, deletedProduct.getId(),
+                AuditSnapshots.product(previousState), AuditSnapshots.product(deletedProduct), AuditSource.WEB);
 
         return toDto(deletedProduct);
     }
 
-    @Transactional
+    @Transactional(
+            timeoutString = "${mercadolivre.sync.transaction-timeout-seconds:300}",
+            noRollbackFor = MercadoLivreSyncException.class
+    )
     public MercadoLivreSyncResponse syncMercadoLivreProducts(String authenticatedEmail, Long systemClientId) {
+        return syncMercadoLivreProducts(authenticatedEmail, systemClientId, AuditSource.WEB);
+    }
+
+    @Transactional(
+            timeoutString = "${mercadolivre.sync.transaction-timeout-seconds:300}",
+            noRollbackFor = MercadoLivreSyncException.class
+    )
+    public MercadoLivreSyncResponse syncMercadoLivreProducts(String authenticatedEmail, Long systemClientId, AuditSource source) {
         validateAuthenticatedEmail(authenticatedEmail);
         validateSystemClientId(systemClientId);
 
@@ -221,23 +255,35 @@ public class ProductService {
             throw new EntityNotFoundException("System client not found for the authenticated user.");
         }
 
-        MarketplaceIntegration integration = marketplaceIntegrationRepository
+        if (!syncLockRepository.tryAcquire(systemClientId)) {
+            Instant previousSync = marketplaceIntegrationRepository
+                    .findBySystemClientIdAndMarketplace(systemClientId, Marketplace.MERCADO_LIVRE)
+                    .map(MarketplaceIntegration::getLastSyncAt)
+                    .orElse(null);
+            LOGGER.info("event=ml_sync_skipped_in_progress systemClientId={}", systemClientId);
+            throw MercadoLivreSyncException.syncInProgress(previousSync);
+        }
+
+        LOGGER.info("event=ml_sync_started systemClientId={}", systemClientId);
+
+        try {
+            MarketplaceIntegration integration = marketplaceIntegrationRepository
                 .findMercadoLivreActiveIntegrationForSync(systemClientId, Marketplace.MERCADO_LIVRE.name())
                 .orElseThrow(() -> new EntityNotFoundException(
                         "Active Mercado Livre integration not found for systemClientId=" + systemClientId
                 ));
 
         extractMarketplaceSellerUserId(integration);
+        var beforeSync = AuditSnapshots.integration(integration);
         Map<String, Object> listings = mercadoLivreListingService.listAllClientListings(systemClientId);
         List<Map<String, Object>> items = extractMercadoLivreItems(listings.get("items"));
+        validateRemoteItemIdentities(items);
         Set<String> syncedItemIds = new LinkedHashSet<>();
 
         int created = 0;
         int updated = 0;
-        int reactivated = 0;
-
         for (Map<String, Object> item : items) {
-            ProductSyncOutcome outcome = syncMercadoLivreItem(systemClientId, item);
+            ProductSyncOutcome outcome = syncMercadoLivreItem(systemClientId, item, source);
             syncedItemIds.add(outcome.itemId());
 
             if (outcome.created()) {
@@ -248,17 +294,57 @@ public class ProductService {
                 updated++;
             }
 
-            if (outcome.reactivated()) {
-                reactivated++;
-            }
         }
 
-        int deactivated = deactivateMissingMercadoLivreProducts(systemClientId, syncedItemIds);
+        deactivateMissingMercadoLivreProducts(systemClientId, syncedItemIds, source);
+
+        Instant completedAt = Instant.now();
+        integration.setLastSyncAt(completedAt);
+        marketplaceIntegrationRepository.saveAndFlush(integration);
+        audit.recordForUser(authenticatedUser, AuditAction.SYNC, AuditEntityType.INTEGRATION,
+                integration.getId(), beforeSync, AuditSnapshots.integration(integration), source,
+                AuditSnapshots.fields("created_products", created, "updated_products", updated));
 
         MercadoLivreSyncResponse response = new MercadoLivreSyncResponse();
         response.setMessage("Anúncios do Mercado Livre sincronizados com sucesso.");
-        response.setSyncedProducts(items.size());
-        return response;
+        response.setCreatedProducts(created);
+        response.setUpdatedProducts(updated);
+        response.setSyncedProducts(created + updated);
+        response.setLastSyncAt(completedAt);
+        LOGGER.info(
+                "event=ml_sync_succeeded systemClientId={} syncedProducts={} createdProducts={} updatedProducts={}",
+                systemClientId,
+                response.getSyncedProducts(),
+                created,
+                updated
+        );
+            return response;
+        } catch (ExternalApiException ex) {
+            if (ex.isRateLimited()) {
+                LOGGER.warn(
+                        "event=ml_sync_rate_limited systemClientId={} retryAfterSeconds={}",
+                        systemClientId,
+                        ex.getRetryAfterSeconds()
+                );
+            } else {
+                LOGGER.warn(
+                        "event=ml_sync_upstream_failed systemClientId={} providerStatus={}",
+                        systemClientId,
+                        ex.getStatusCode().value()
+                );
+            }
+            throw ex;
+        } catch (MercadoLivreSyncException ex) {
+            LOGGER.warn("event=ml_sync_failed systemClientId={} code={}", systemClientId, ex.getCode());
+            throw ex;
+        } catch (RuntimeException ex) {
+            LOGGER.warn(
+                    "event=ml_sync_failed systemClientId={} errorType={}",
+                    systemClientId,
+                    ex.getClass().getSimpleName()
+            );
+            throw ex;
+        }
     }
 
     private Product findActiveById(Long systemClientId, Long id) {
@@ -295,7 +381,7 @@ public class ProductService {
 
         boolean hasProductRead = principal.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch("PRODUCT_READ"::equals);
+                .anyMatch(PermissionAuthority.PRODUCT_READ::equals);
         if (!hasProductRead) {
             throw new AccessDeniedException("PRODUCT_READ permission is required.");
         }
@@ -490,18 +576,29 @@ public class ProductService {
         return copy;
     }
 
-    private ProductSyncOutcome syncMercadoLivreItem(Long systemClientId, Map<String, Object> rawItem) {
+    private ProductSyncOutcome syncMercadoLivreItem(Long systemClientId, Map<String, Object> rawItem, AuditSource source) {
         Map<String, Object> item = normalizeMercadoLivreItem(rawItem);
         String itemId = requiredString(item, "id", "Mercado Livre item id is required during sync.");
-        String sku = resolveMercadoLivreSku(item, itemId);
+        String requestedSku = resolveMercadoLivreSku(item, itemId);
 
         Optional<Product> productByItemId = productRepository.findBySystemClientIdAndMercadoLivreItemId(systemClientId, itemId);
-        Optional<Product> productBySku = productByItemId.isPresent()
-                ? Optional.empty()
-                : productRepository.findBySkuAndSystemClientId(sku, systemClientId);
+        Optional<Product> productBySku = productRepository.findBySkuAndSystemClientId(requestedSku, systemClientId);
 
-        boolean created = productByItemId.isEmpty() && productBySku.isEmpty();
-        Product target = productByItemId.or(() -> productBySku).orElseGet(Product::new);
+        Product target;
+        boolean created;
+        if (productByItemId.isPresent()) {
+            target = productByItemId.get();
+            created = false;
+        } else if (productBySku.isPresent()
+                && extractMercadoLivreItemIdOrNull(productBySku.get().getResource()) == null) {
+            target = productBySku.get();
+            created = false;
+        } else {
+            target = new Product();
+            created = true;
+        }
+
+        String sku = resolveLocalSku(systemClientId, target, productBySku, requestedSku, itemId);
         boolean reactivated = !created && !target.getActive();
         Product previousState = created ? null : copy(target);
 
@@ -510,18 +607,69 @@ public class ProductService {
 
         if (created) {
             productLogService.logCreate(saved);
+            audit.record(systemClientId, AuditAction.CREATE, AuditEntityType.PRODUCT, saved.getId(),
+                    null, AuditSnapshots.product(saved), source);
             return new ProductSyncOutcome(itemId, true, false, false);
         }
 
         if (reactivated || hasProductChanged(previousState, saved)) {
             productLogService.logEdit(previousState, saved);
-            return new ProductSyncOutcome(itemId, false, !reactivated, reactivated);
+            audit.record(systemClientId, AuditAction.UPDATE, AuditEntityType.PRODUCT, saved.getId(),
+                    AuditSnapshots.product(previousState), AuditSnapshots.product(saved), source);
+            return new ProductSyncOutcome(itemId, false, true, reactivated);
         }
 
-        return new ProductSyncOutcome(itemId, false, false, false);
+        return new ProductSyncOutcome(itemId, false, true, false);
     }
 
-    private int deactivateMissingMercadoLivreProducts(Long systemClientId, Set<String> syncedItemIds) {
+    private String resolveLocalSku(
+            Long systemClientId,
+            Product target,
+            Optional<Product> productByRequestedSku,
+            String requestedSku,
+            String itemId
+    ) {
+        if (productByRequestedSku.isEmpty()
+                || Objects.equals(productByRequestedSku.get().getId(), target.getId())) {
+            return requestedSku;
+        }
+        return deterministicMercadoLivreSku(systemClientId, target, itemId);
+    }
+
+    private String deterministicMercadoLivreSku(Long systemClientId, Product target, String itemId) {
+        String normalized = itemId.replaceAll("[^A-Za-z0-9._-]", "-");
+        String base = "ML-" + normalized;
+        base = base.length() <= 90 ? base : base.substring(0, 90);
+        for (int attempt = 0; attempt < 100; attempt++) {
+            String candidate = attempt == 0
+                    ? base
+                    : base + "-" + Integer.toUnsignedString(Objects.hash(itemId, attempt), 36);
+            Optional<Product> owner = productRepository.findBySkuAndSystemClientId(candidate, systemClientId);
+            if (owner.isEmpty() || Objects.equals(owner.get().getId(), target.getId())) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("Unable to allocate a deterministic local SKU for Mercado Livre item.");
+    }
+
+    private void validateRemoteItemIdentities(List<Map<String, Object>> rawItems) {
+        Set<String> identities = new LinkedHashSet<>();
+        for (Map<String, Object> rawItem : rawItems) {
+            Map<String, Object> item = normalizeMercadoLivreItem(rawItem);
+            String itemId = requiredString(
+                    item,
+                    "id",
+                    "Mercado Livre item id is required during sync."
+            );
+            if (!identities.add(itemId)) {
+                throw new IllegalArgumentException(
+                        "Mercado Livre catalog contains duplicate item id: " + itemId
+                );
+            }
+        }
+    }
+
+    private int deactivateMissingMercadoLivreProducts(Long systemClientId, Set<String> syncedItemIds, AuditSource source) {
         List<Product> mercadoLivreProducts = productRepository.findAllMercadoLivreProductsBySystemClientId(systemClientId);
         int deactivated = 0;
 
@@ -535,6 +683,8 @@ public class ProductService {
             product.setActive(false);
             Product saved = productRepository.save(product);
             productLogService.logDelete(previousState, saved);
+            audit.record(systemClientId, AuditAction.DELETE, AuditEntityType.PRODUCT, saved.getId(),
+                    AuditSnapshots.product(previousState), AuditSnapshots.product(saved), source);
             deactivated++;
         }
 
@@ -548,15 +698,16 @@ public class ProductService {
 
         List<Map<String, Object>> normalizedItems = new ArrayList<>();
         for (Object rawItem : items) {
-            if (rawItem instanceof Map<?, ?> itemMap) {
-                Map<String, Object> normalized = new LinkedHashMap<>();
-                for (Map.Entry<?, ?> entry : itemMap.entrySet()) {
-                    if (entry.getKey() != null) {
-                        normalized.put(String.valueOf(entry.getKey()), entry.getValue());
-                    }
-                }
-                normalizedItems.add(normalized);
+            if (!(rawItem instanceof Map<?, ?> itemMap)) {
+                throw new IllegalArgumentException("Mercado Livre catalog contains a malformed item.");
             }
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : itemMap.entrySet()) {
+                if (entry.getKey() != null) {
+                    normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+            normalizedItems.add(normalized);
         }
 
         return normalizedItems;
@@ -698,7 +849,7 @@ public class ProductService {
             throw new IllegalArgumentException(message);
         }
 
-        return String.valueOf(value);
+        return String.valueOf(value).trim();
     }
 
     private int extractInteger(Object value) {

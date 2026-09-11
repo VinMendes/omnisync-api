@@ -44,7 +44,7 @@ class DashboardServiceTest {
                 3
         ));
 
-        var summary = service.getSummary(3L, "7d", principal(3L, "PRODUCT_READ", "SALE_READ"));
+        var summary = service.getSummary(3L, "7d", principal(3L, "PERM_PRODUCT_READ", "PERM_SALE_READ"));
 
         assertThat(summary.totalProducts()).isZero();
         assertThat(summary.totalStock()).isZero();
@@ -82,7 +82,7 @@ class DashboardServiceTest {
                 4
         ));
 
-        var summary = service.getSummary(3L, "7d", principal(3L, "PRODUCT_READ", "SALE_READ"));
+        var summary = service.getSummary(3L, "7d", principal(3L, "PERM_PRODUCT_READ", "PERM_SALE_READ"));
 
         assertThat(summary.totalProductsChangePct()).isEqualByComparingTo("2.4");
         assertThat(summary.totalStockChangePct()).isEqualByComparingTo("-0.8");
@@ -97,7 +97,7 @@ class DashboardServiceTest {
 
     @Test
     void rejectsAnotherTenantBeforeRunningQueries() {
-        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(4L, "PRODUCT_READ", "SALE_READ")))
+        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(4L, "PERM_PRODUCT_READ", "PERM_SALE_READ")))
                 .isInstanceOf(EntityNotFoundException.class);
 
         verify(repository, never()).load(any(), any(), any(), any(), any(), any());
@@ -105,15 +105,16 @@ class DashboardServiceTest {
 
     @Test
     void requiresBothReadPermissions() {
-        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L, "SALE_READ")))
+        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L, "PERM_SALE_READ")))
                 .isInstanceOf(AccessDeniedException.class);
-        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L, "PRODUCT_READ")))
+        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L, "PERM_PRODUCT_READ")))
                 .isInstanceOf(AccessDeniedException.class);
     }
 
     @Test
     void rejectsUnsupportedRange() {
-        assertThatThrownBy(() -> service.getSummary(3L, "90d", principal(3L, "PRODUCT_READ", "SALE_READ")))
+        assertThatThrownBy(() -> service.getSummary(
+                3L, "90d", principal(3L, "PERM_PRODUCT_READ", "PERM_SALE_READ")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("range must be 7d or 30d.");
     }

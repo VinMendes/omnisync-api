@@ -52,7 +52,8 @@ class MercadoLivreOrderWebhookServiceTest {
                 mercadoLivreClient,
                 productRepository,
                 saleRepository,
-                saleLogService
+                saleLogService,
+                mock(com.puccampinas.omnisync.core.audit.AuditService.class)
         );
     }
 

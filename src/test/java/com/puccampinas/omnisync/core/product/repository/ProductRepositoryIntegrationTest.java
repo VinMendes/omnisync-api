@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -59,6 +60,18 @@ class ProductRepositoryIntegrationTest {
         assertThat(second.hasNext()).isFalse();
     }
 
+    @Test
+    void mercadoLivreIdentityIsUniquePerTenantButReusableAcrossTenants() {
+        long firstTenant = insertTenant("Repository tenant A", "repo-a");
+        long secondTenant = insertTenant("Repository tenant B", "repo-b");
+
+        insertMarketplaceProduct(firstTenant, "A", "MLB-SHARED");
+        insertMarketplaceProduct(secondTenant, "B", "MLB-SHARED");
+
+        assertThatThrownBy(() -> insertMarketplaceProduct(firstTenant, "C", "MLB-SHARED"))
+                .hasMessageContaining("uk_products_client_ml_item_id");
+    }
+
     private long insertTenant(String name, String document) {
         return jdbc.queryForObject(
                 "INSERT INTO system_client(name, document) VALUES (?, ?) RETURNING id",
@@ -89,6 +102,19 @@ class ProductRepositoryIntegrationTest {
                 minimumStock,
                 new BigDecimal("10.00"),
                 active
+        );
+    }
+
+    private void insertMarketplaceProduct(long tenant, String sku, String itemId) {
+        jdbc.update("""
+                        INSERT INTO products(system_client_id, sku, name, description, stock,
+                                             reserved_stock, minimum_stock, price, resource, active)
+                        VALUES (?, ?, 'Product', 'Description', 0, 0, 0, 1.00,
+                                jsonb_build_object('mercado_livre', jsonb_build_object('item_id', ?)), TRUE)
+                        """,
+                tenant,
+                sku,
+                itemId
         );
     }
 }

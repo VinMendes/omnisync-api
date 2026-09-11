@@ -1,5 +1,6 @@
 package com.puccampinas.omnisync.core.auth.security;
 
+import com.puccampinas.omnisync.config.security.PermissionAuthority;
 import com.puccampinas.omnisync.core.systemClient.entity.SystemClient;
 import com.puccampinas.omnisync.core.systemClient.repository.SystemClientRepository;
 import com.puccampinas.omnisync.core.users.entity.User;
@@ -57,7 +58,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         }
         Set<String> authorities = new TreeSet<>();
         authorities.add("ROLE_" + tenantRole.getName().name());
-        tenantRole.getPermissions().forEach(permission -> authorities.add(permission.name()));
+        tenantRole.getPermissions().forEach(permission -> authorities.add(PermissionAuthority.of(permission)));
         return authorities.stream().<GrantedAuthority>map(SimpleGrantedAuthority::new).toList();
     }
 

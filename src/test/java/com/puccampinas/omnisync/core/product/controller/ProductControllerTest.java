@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.product.controller;
 
+import com.puccampinas.omnisync.config.security.TenantAccess;
+
 import com.puccampinas.omnisync.core.auth.cookie.AuthCookieService;
 import com.puccampinas.omnisync.core.auth.jwt.JwtService;
 import com.puccampinas.omnisync.core.auth.security.CustomUserDetailsService;
@@ -30,6 +32,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(ProductController.class)
 @AutoConfigureMockMvc(addFilters = false)
 class ProductControllerTest {
+
+    @MockitoBean
+    private TenantAccess tenantAccess;
 
     @Autowired
     private MockMvc mockMvc;
@@ -80,7 +85,7 @@ class ProductControllerTest {
     void getLowStockShouldReturnTheDocumentedPaginationContract() throws Exception {
         OmniUserPrincipal principal = new OmniUserPrincipal(
                 8L, 1L, "Product reader", "reader@example.com", null, true, true,
-                List.of(new SimpleGrantedAuthority("PRODUCT_READ"))
+                List.of(new SimpleGrantedAuthority("PERM_PRODUCT_READ"))
         );
         ProductDto product = new ProductDto();
         product.setId(51L);

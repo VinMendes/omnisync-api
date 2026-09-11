@@ -4,22 +4,35 @@ import com.puccampinas.omnisync.core.users.dto.UserResponse;
 import com.puccampinas.omnisync.core.users.dto.UserStatusUpdateRequest;
 import com.puccampinas.omnisync.core.users.dto.UserUpdateRequest;
 import com.puccampinas.omnisync.core.users.service.UserService;
-import jakarta.persistence.EntityNotFoundException;
+import com.puccampinas.omnisync.core.auth.dto.RegisterRequest;
+import com.puccampinas.omnisync.core.auth.service.RegistrationService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+
+import static com.puccampinas.omnisync.config.security.PermissionAuthority.HAS_USER_MANAGE;
 
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
     private final UserService userService;
+    private final RegistrationService registrationService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, RegistrationService registrationService) {
         this.userService = userService;
+        this.registrationService = registrationService;
+    }
+
+    @PostMapping
+    @PreAuthorize(HAS_USER_MANAGE)
+    public ResponseEntity<UserResponse> create(@Valid @RequestBody RegisterRequest request) {
+        // Não emite cookies: a sessão de quem está administrando permanece a mesma.
+        return ResponseEntity.status(201).body(registrationService.createMember(request));
     }
 
     @GetMapping("/me")
@@ -29,21 +42,12 @@ public class UserController {
             return ResponseEntity.status(401).body("Usuário não autenticado.");
         }
 
-        try {
-            String email = authentication.getName();
-            return ResponseEntity.ok(userService.findMe(email));
-        } catch (EntityNotFoundException e) {
-            return ResponseEntity.status(404).body(e.getMessage());
-        }
+        return ResponseEntity.ok(userService.findMe(authentication.getName()));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<?> findById(@PathVariable Long id, Authentication authentication) {
-        try {
-            return ResponseEntity.ok(userService.findById(authentication.getName(), id));
-        } catch (EntityNotFoundException e) {
-            return ResponseEntity.status(404).body(e.getMessage());
-        }
+    public ResponseEntity<UserResponse> findById(@PathVariable Long id, Authentication authentication) {
+        return ResponseEntity.ok(userService.findById(authentication.getName(), id));
     }
 
     @GetMapping
@@ -52,36 +56,22 @@ public class UserController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(
+    @PreAuthorize(HAS_USER_MANAGE)
+    public ResponseEntity<UserResponse> update(
             @PathVariable Long id,
             @RequestBody UserUpdateRequest request,
             Authentication authentication
     ) {
-        try {
-            return ResponseEntity.ok(userService.update(authentication.getName(), id, request));
-        } catch (EntityNotFoundException e) {
-            return ResponseEntity.status(404).body(e.getMessage());
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        } catch (AccessDeniedException e) {
-            return ResponseEntity.status(403).body(e.getMessage());
-        }
+        return ResponseEntity.ok(userService.update(authentication.getName(), id, request));
     }
 
     @PatchMapping("/{id}/status")
-    public ResponseEntity<?> updateStatus(
+    @PreAuthorize(HAS_USER_MANAGE)
+    public ResponseEntity<UserResponse> updateStatus(
             @PathVariable Long id,
             @RequestBody UserStatusUpdateRequest request,
             Authentication authentication
     ) {
-        try {
-            return ResponseEntity.ok(userService.updateStatus(authentication.getName(), id, request));
-        } catch (EntityNotFoundException e) {
-            return ResponseEntity.status(404).body(e.getMessage());
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        } catch (AccessDeniedException e) {
-            return ResponseEntity.status(403).body(e.getMessage());
-        }
+        return ResponseEntity.ok(userService.updateStatus(authentication.getName(), id, request));
     }
 }

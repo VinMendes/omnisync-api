@@ -1,5 +1,10 @@
 package com.puccampinas.omnisync.integration.service;
 
+import com.puccampinas.omnisync.core.audit.*;
+import com.puccampinas.omnisync.core.users.repository.UserRepository;
+import com.puccampinas.omnisync.core.users.enums.Permission;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.core.systemClient.service.SystemClientService;
 import com.puccampinas.omnisync.core.users.entity.User;
@@ -34,6 +39,8 @@ public class MercadoLivreAuthService {
     private final SystemClientService systemClientService;
     private final UserService userService;
     private final TextEncryptor encryptor;
+    private final AuditService audit;
+    private final UserRepository users;
 
     @Value("${mercadolivre.redirect-uri}")
     private String redirectUri;
@@ -49,13 +56,17 @@ public class MercadoLivreAuthService {
             MarketplaceIntegrationRepository repository,
             SystemClientService systemClientService,
             UserService userService,
-            TextEncryptor encryptor
+            TextEncryptor encryptor,
+            AuditService audit,
+            UserRepository users
     ) {
         this.client = client;
         this.repository = repository;
         this.systemClientService = systemClientService;
         this.userService = userService;
         this.encryptor = encryptor;
+        this.audit = audit;
+        this.users = users;
     }
 
     public String generateAuthorizationUrl(Long systemClientId) {
@@ -65,8 +76,10 @@ public class MercadoLivreAuthService {
         return client.buildAuthorizationUrl(redirectUri, state);
     }
 
+    @Transactional
     public Long handleCallback(String state, String code) {
         Long systemClientId = extractSystemClientIdFromState(state);
+        AuditActor initiator = callbackActor(state, systemClientId);
         validateSystemClient(systemClientId);
 
         MercadoLivreTokenResponse token = client.exchangeCode(code, redirectUri);
@@ -78,6 +91,7 @@ public class MercadoLivreAuthService {
                 )
                 .orElseGet(MarketplaceIntegration::new);
 
+        var before = AuditSnapshots.integration(integration);
         integration.setSystemClientId(systemClientId);
         integration.setMarketplace(Marketplace.MERCADO_LIVRE);
         integration.setAccessToken(encryptor.encrypt(token.getAccessToken()));
@@ -93,10 +107,13 @@ public class MercadoLivreAuthService {
         repository.save(integration);
 
         systemClientService.markMarketplaceConnected(systemClientId, "mercado_livre");
+        audit.recordAs(initiator, AuditAction.CONNECT, AuditEntityType.INTEGRATION, integration.getId(),
+                before, AuditSnapshots.integration(integration), AuditSource.OAUTH_CALLBACK, Map.of());
 
         return systemClientId;
     }
 
+    @Transactional
     public MercadoLivreIntegrationResponse exchangeCodeForAuthenticatedUser(
             String authenticatedEmail,
             String state,
@@ -126,9 +143,29 @@ public class MercadoLivreAuthService {
                 integration.getMarketplace(),
                 integration.getActive(),
                 integration.getExpiresAt(),
-                integration.getResource(),
-                encryptor.decrypt(integration.getAccessToken())
+                integration.getResource()
         );
+    }
+
+    @Transactional
+    public void disconnect(Long systemClientId) {
+        MarketplaceIntegration integration = repository
+                .findBySystemClientIdAndMarketplaceForUpdate(systemClientId, Marketplace.MERCADO_LIVRE)
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Integração não encontrada."));
+        if (!Boolean.TRUE.equals(integration.getActive())) return;
+        var before = AuditSnapshots.integration(integration);
+        integration.setActive(false);
+        // Local disconnection also removes stored credentials (access_token is NOT NULL).
+        integration.setAccessToken("");
+        integration.setRefreshToken(null);
+        repository.save(integration);
+        var company = systemClientService.getById(systemClientId);
+        Map<String, Object> resources = new HashMap<>();
+        if (company.getResource() != null) resources.putAll(company.getResource());
+        resources.put("mercado_livre", false);
+        systemClientService.updateClientsMarketplaces(systemClientId, resources);
+        audit.record(systemClientId, AuditAction.DISCONNECT, AuditEntityType.INTEGRATION, integration.getId(),
+                before, AuditSnapshots.integration(integration), AuditSource.WEB);
     }
 
     public MercadoLivreIntegrationStatusResponse getStatus(Long systemClientId) {
@@ -139,7 +176,8 @@ public class MercadoLivreAuthService {
                         integration.getSystemClientId(),
                         integration.getActive(),
                         integration.getExpiresAt(),
-                        integration.getMarketplace().name()
+                        integration.getMarketplace().name(),
+                        integration.getLastSyncAt()
                 ))
                 .orElseGet(() -> MercadoLivreIntegrationStatusResponse.notConnected(systemClientId));
     }
@@ -168,7 +206,9 @@ public class MercadoLivreAuthService {
 
     private String generateState(Long systemClientId) {
         long expiresAtEpochSeconds = Instant.now().plusSeconds(stateTtlSeconds).getEpochSecond();
-        String payload = systemClientId + ":" + expiresAtEpochSeconds + ":" + UUID.randomUUID();
+        AuditActor initiator = audit.actor(systemClientId);
+        String payload = systemClientId + ":" + expiresAtEpochSeconds + ":" + UUID.randomUUID()
+                + ":" + (initiator.id() == null ? "0" : initiator.id());
         String signature = sign(payload);
         String rawState = payload + ":" + signature;
         return Base64.getUrlEncoder()
@@ -181,13 +221,13 @@ public class MercadoLivreAuthService {
             String rawState = new String(Base64.getUrlDecoder().decode(state), StandardCharsets.UTF_8);
             String[] parts = rawState.split(":");
 
-            if (parts.length != 4) {
+            if (parts.length != 4 && parts.length != 5) {
                 throw new IllegalArgumentException("OAuth state is malformed.");
             }
 
-            String payload = parts[0] + ":" + parts[1] + ":" + parts[2];
+            String payload = String.join(":", java.util.Arrays.copyOf(parts, parts.length - 1));
             String expectedSignature = sign(payload);
-            String receivedSignature = parts[3];
+            String receivedSignature = parts[parts.length - 1];
 
             if (!MessageDigest.isEqual(
                     expectedSignature.getBytes(StandardCharsets.UTF_8),
@@ -207,6 +247,18 @@ public class MercadoLivreAuthService {
         } catch (Exception ex) {
             throw new IllegalArgumentException("OAuth state could not be validated.", ex);
         }
+    }
+
+    /** Called only after signature/expiry validation; older state has no attributable user. */
+    private AuditActor callbackActor(String state, Long tenantId) {
+        String[] parts = new String(Base64.getUrlDecoder().decode(state), StandardCharsets.UTF_8).split(":");
+        if (parts.length == 4 || parts[3].equals("0")) return AuditActor.system(tenantId);
+        User user = users.findById(Long.valueOf(parts[3]))
+                .filter(u -> tenantId.equals(u.getSystemClientId()) && Boolean.TRUE.equals(u.getActive()))
+                .orElseThrow(() -> new IllegalArgumentException("Autor do OAuth inválido."));
+        if (user.getTenantRole() == null || !user.getTenantRole().getPermissions().contains(Permission.INTEGRATION_MANAGE))
+            throw new com.puccampinas.omnisync.config.security.PermissionDeniedException(Permission.INTEGRATION_MANAGE);
+        return AuditActor.from(user);
     }
 
     private String sign(String payload) {

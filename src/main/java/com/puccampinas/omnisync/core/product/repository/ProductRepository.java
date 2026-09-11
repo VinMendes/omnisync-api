@@ -16,6 +16,28 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Page<Product> findAllBySystemClientIdAndActiveTrue(Long systemClientId, Pageable pageable);
 
+    @Query(
+            value = """
+                    SELECT product
+                    FROM Product product
+                    WHERE product.systemClientId = :systemClientId
+                      AND product.active = TRUE
+                      AND (product.stock - product.reservedStock) <= product.minimumStock
+                    ORDER BY product.id
+                    """,
+            countQuery = """
+                    SELECT COUNT(product)
+                    FROM Product product
+                    WHERE product.systemClientId = :systemClientId
+                      AND product.active = TRUE
+                      AND (product.stock - product.reservedStock) <= product.minimumStock
+                    """
+    )
+    Page<Product> findLowStockProducts(
+            @Param("systemClientId") Long systemClientId,
+            Pageable pageable
+    );
+
     Optional<Product> findBySkuAndSystemClientIdAndActiveTrue(String sku, Long systemClientId);
 
     Optional<Product> findBySkuAndSystemClientId(String sku, Long systemClientId);

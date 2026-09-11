@@ -48,8 +48,10 @@ class DashboardControllerTest {
         OmniUserPrincipal principal = principal();
         DashboardSummary response = new DashboardSummary(
                 128, new BigDecimal("2.4"), 4521, new BigDecimal("-0.8"),
-                83, new BigDecimal("5.1"), new BigDecimal("14290.00"), new BigDecimal("12.3"),
-                List.of(new DashboardSalesDay(LocalDate.parse("2026-08-20"), new BigDecimal("4200.00"), 12))
+                new BigDecimal("48250.90"), 83, new BigDecimal("5.1"),
+                new BigDecimal("14290.00"), new BigDecimal("12.3"), 18, 7,
+                List.of(new DashboardSalesDay(LocalDate.parse("2026-08-20"), new BigDecimal("4200.00"), 12)),
+                List.of()
         );
         when(dashboardService.getSummary(3L, "7d", principal)).thenReturn(response);
 
@@ -60,8 +62,12 @@ class DashboardControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalProducts").value(128))
                     .andExpect(jsonPath("$.totalStock").value(4521))
+                    .andExpect(jsonPath("$.inventoryValue").value(48250.90))
                     .andExpect(jsonPath("$.activeListings").value(83))
                     .andExpect(jsonPath("$.revenueToday").value(14290.00))
+                    .andExpect(jsonPath("$.salesTodayCount").value(18))
+                    .andExpect(jsonPath("$.lowStockCount").value(7))
+                    .andExpect(jsonPath("$.recentEvents").isArray())
                     .andExpect(jsonPath("$.salesByDay[0].date").value("2026-08-20"))
                     .andExpect(jsonPath("$.salesByDay[0].total").value(4200.00))
                     .andExpect(jsonPath("$.salesByDay[0].count").value(12));

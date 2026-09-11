@@ -1,44 +1,120 @@
 package com.puccampinas.omnisync.core.product.repository;
 
-import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
-import org.flywaydb.core.Flyway;
+import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
+import com.puccampinas.omnisync.support.EmbeddedPostgresTestConfig;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@SpringBootTest
+@ActiveProfiles("test")
+@Import(EmbeddedPostgresTestConfig.class)
+@Transactional
 class ProductRepositoryIntegrationTest {
 
+    @Autowired
+    private ProductRepository repository;
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @Test
-    void mercadoLivreIdentityIsUniquePerTenantButReusableAcrossTenants() throws Exception {
-        try (EmbeddedPostgres postgres = EmbeddedPostgres.builder()
-                .setServerConfig("listen_addresses", "127.0.0.1").start()) {
-            var dataSource = postgres.getPostgresDatabase();
-            Flyway.configure().dataSource(dataSource).load().migrate();
-            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-            long first = tenant(jdbc, "repo-a");
-            long second = tenant(jdbc, "repo-b");
-            insert(jdbc, first, "A", "MLB-SHARED");
-            insert(jdbc, second, "B", "MLB-SHARED");
-            assertThatThrownBy(() -> insert(jdbc, first, "C", "MLB-SHARED"))
-                    .hasMessageContaining("uk_products_client_ml_item_id");
-        }
+    void findsOnlyActiveLowStockProductsFromRequestedTenantIncludingExactLimit() {
+        long tenant = insertTenant("Low stock tenant", "70000000000700");
+        long anotherTenant = insertTenant("Other low stock tenant", "80000000000800");
+
+        insertProduct(tenant, "BELOW", 4, 1, 5, true);
+        insertProduct(tenant, "EQUAL", 7, 2, 5, true);
+        insertProduct(tenant, "ABOVE", 8, 2, 5, true);
+        insertProduct(tenant, "INACTIVE", 1, 0, 5, false);
+        insertProduct(anotherTenant, "OTHER", 1, 0, 5, true);
+
+        var result = repository.findLowStockProducts(tenant, new OffsetLimitPageable(0, 20));
+
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getContent())
+                .extracting(product -> product.getSku())
+                .containsExactly("BELOW", "EQUAL");
     }
 
-    private long tenant(JdbcTemplate jdbc, String document) {
+    @Test
+    void paginatesLowStockProductsUsingOffsetAndLimit() {
+        long tenant = insertTenant("Paginated stock tenant", "90000000000900");
+        insertProduct(tenant, "LOW-1", 1, 0, 5, true);
+        insertProduct(tenant, "LOW-2", 2, 0, 5, true);
+
+        var first = repository.findLowStockProducts(tenant, new OffsetLimitPageable(0, 1));
+        var second = repository.findLowStockProducts(tenant, new OffsetLimitPageable(1, 1));
+
+        assertThat(first.getContent()).extracting(product -> product.getSku()).containsExactly("LOW-1");
+        assertThat(first.hasNext()).isTrue();
+        assertThat(second.getContent()).extracting(product -> product.getSku()).containsExactly("LOW-2");
+        assertThat(second.hasNext()).isFalse();
+    }
+
+    @Test
+    void mercadoLivreIdentityIsUniquePerTenantButReusableAcrossTenants() {
+        long firstTenant = insertTenant("Repository tenant A", "repo-a");
+        long secondTenant = insertTenant("Repository tenant B", "repo-b");
+
+        insertMarketplaceProduct(firstTenant, "A", "MLB-SHARED");
+        insertMarketplaceProduct(secondTenant, "B", "MLB-SHARED");
+
+        assertThatThrownBy(() -> insertMarketplaceProduct(firstTenant, "C", "MLB-SHARED"))
+                .hasMessageContaining("uk_products_client_ml_item_id");
+    }
+
+    private long insertTenant(String name, String document) {
         return jdbc.queryForObject(
-                "INSERT INTO system_client(name, document) VALUES ('Repository tenant', ?) RETURNING id",
+                "INSERT INTO system_client(name, document) VALUES (?, ?) RETURNING id",
                 Long.class,
+                name,
                 document
         );
     }
 
-    private void insert(JdbcTemplate jdbc, long tenant, String sku, String itemId) {
+    private void insertProduct(
+            long tenant,
+            String sku,
+            int stock,
+            int reservedStock,
+            int minimumStock,
+            boolean active
+    ) {
         jdbc.update("""
-                INSERT INTO products(system_client_id, sku, name, description, stock,
-                                     reserved_stock, price, resource, active)
-                VALUES (?, ?, 'Product', 'Description', 0, 0, 1.00,
-                        jsonb_build_object('mercado_livre', jsonb_build_object('item_id', ?)), TRUE)
-                """, tenant, sku, itemId);
+                        INSERT INTO products(system_client_id, sku, name, description, stock, reserved_stock,
+                                             minimum_stock, price, resource, active)
+                        VALUES (?, ?, ?, 'Test product', ?, ?, ?, ?, '{}'::jsonb, ?)
+                        """,
+                tenant,
+                sku,
+                sku,
+                stock,
+                reservedStock,
+                minimumStock,
+                new BigDecimal("10.00"),
+                active
+        );
+    }
+
+    private void insertMarketplaceProduct(long tenant, String sku, String itemId) {
+        jdbc.update("""
+                        INSERT INTO products(system_client_id, sku, name, description, stock,
+                                             reserved_stock, minimum_stock, price, resource, active)
+                        VALUES (?, ?, 'Product', 'Description', 0, 0, 0, 1.00,
+                                jsonb_build_object('mercado_livre', jsonb_build_object('item_id', ?)), TRUE)
+                        """,
+                tenant,
+                sku,
+                itemId
+        );
     }
 }

@@ -1,5 +1,6 @@
 package com.puccampinas.omnisync.core.dashboard.repository;
 
+import com.puccampinas.omnisync.core.dashboard.dto.DashboardRecentEvent;
 import com.puccampinas.omnisync.core.dashboard.dto.DashboardSalesDay;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +37,11 @@ public class DashboardMetricsRepository {
                         SELECT
                             COUNT(*) FILTER (WHERE active) AS total_products,
                             COALESCE(SUM(stock) FILTER (WHERE active), 0) AS total_stock,
+                            COALESCE(SUM(stock * price) FILTER (WHERE active), 0) AS inventory_value,
+                            COUNT(*) FILTER (
+                                WHERE active
+                                  AND (stock - reserved_stock) <= minimum_stock
+                            ) AS low_stock_count,
                             COUNT(*) FILTER (
                                 WHERE active
                                   AND NULLIF(BTRIM(resource -> 'mercado_livre' ->> 'item_id'), '') IS NOT NULL
@@ -54,6 +60,8 @@ public class DashboardMetricsRepository {
                 .query((rs, rowNum) -> new ProductMetrics(
                         rs.getLong("total_products"),
                         rs.getLong("total_stock"),
+                        rs.getBigDecimal("inventory_value"),
+                        rs.getLong("low_stock_count"),
                         rs.getLong("active_listings"),
                         rs.getLong("previous_products"),
                         rs.getLong("previous_listings")
@@ -103,6 +111,9 @@ public class DashboardMetricsRepository {
                             COALESCE(SUM(total_value) FILTER (
                                 WHERE confirmed_at >= :todayStart AND confirmed_at < :rangeEnd
                             ), 0) AS revenue_today,
+                            COUNT(*) FILTER (
+                                WHERE confirmed_at >= :todayStart AND confirmed_at < :rangeEnd
+                            ) AS sales_today_count,
                             COALESCE(SUM(total_value) FILTER (
                                 WHERE confirmed_at >= :yesterdayStart AND confirmed_at < :todayStart
                             ), 0) AS revenue_yesterday,
@@ -124,6 +135,7 @@ public class DashboardMetricsRepository {
                 .param("yesterdayStart", yesterdayStart)
                 .query((rs, rowNum) -> new RevenueMetrics(
                         rs.getBigDecimal("revenue_today"),
+                        rs.getLong("sales_today_count"),
                         rs.getBigDecimal("revenue_yesterday"),
                         rs.getLong("sold_quantity_in_range")
                 ))
@@ -166,16 +178,52 @@ public class DashboardMetricsRepository {
                 ))
                 .list();
 
+        List<DashboardRecentEvent> recentEvents = jdbcClient.sql("""
+                        SELECT event_id, entity_type, entity_id, action, created_at
+                        FROM (
+                            SELECT CONCAT('PRODUCT:', id) AS event_id,
+                                   'PRODUCT' AS entity_type,
+                                   product_id AS entity_id,
+                                   action,
+                                   created_at
+                            FROM product_logs
+                            WHERE system_client_id = :systemClientId
+
+                            UNION ALL
+
+                            SELECT CONCAT('SALE:', id) AS event_id,
+                                   'SALE' AS entity_type,
+                                   sale_id AS entity_id,
+                                   action,
+                                   created_at
+                            FROM sales_logs
+                            WHERE system_client_id = :systemClientId
+                        ) audit_event
+                        ORDER BY created_at DESC, event_id DESC
+                        LIMIT 10
+                        """)
+                .param("systemClientId", systemClientId)
+                .query((rs, rowNum) -> new DashboardRecentEvent(
+                        rs.getString("event_id"),
+                        rs.getString("entity_type"),
+                        rs.getLong("entity_id"),
+                        rs.getString("action"),
+                        rs.getTimestamp("created_at").toLocalDateTime()
+                ))
+                .list();
+
         long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000;
         log.info("Dashboard summary queries completed in {} ms for systemClientId={} rangeStart={} rangeEnd={}",
                 elapsedMillis, systemClientId, rangeStart, rangeEnd);
 
-        return new DashboardMetrics(products, revenue, salesByDay, elapsedMillis);
+        return new DashboardMetrics(products, revenue, salesByDay, recentEvents, elapsedMillis);
     }
 
     public record ProductMetrics(
             long totalProducts,
             long totalStock,
+            BigDecimal inventoryValue,
+            long lowStockCount,
             long activeListings,
             long previousProducts,
             long previousListings
@@ -184,6 +232,7 @@ public class DashboardMetricsRepository {
 
     public record RevenueMetrics(
             BigDecimal revenueToday,
+            long salesTodayCount,
             BigDecimal revenueYesterday,
             long soldQuantityInRange
     ) {
@@ -193,6 +242,7 @@ public class DashboardMetricsRepository {
             ProductMetrics products,
             RevenueMetrics revenue,
             List<DashboardSalesDay> salesByDay,
+            List<DashboardRecentEvent> recentEvents,
             long queryElapsedMillis
     ) {
     }

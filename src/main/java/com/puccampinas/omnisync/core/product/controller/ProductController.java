@@ -1,11 +1,14 @@
 package com.puccampinas.omnisync.core.product.controller;
 
+import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
+import com.puccampinas.omnisync.core.product.dto.LowStockProductsResponse;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.service.ProductService;
 import com.puccampinas.omnisync.config.security.TenantAccess;
 import com.puccampinas.omnisync.core.users.enums.Permission;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -49,6 +52,18 @@ public class ProductController {
     ) {
         access.requireTenant(systemClientId);
         return ResponseEntity.ok(this.service.getAll(systemClientId, offset, limit));
+    }
+
+    @GetMapping("/low-stock")
+    @PreAuthorize(HAS_PRODUCT_READ)
+    public ResponseEntity<LowStockProductsResponse> getLowStock(
+            @PathVariable Long systemClientId,
+            @RequestParam(defaultValue = "0") long offset,
+            @RequestParam(defaultValue = "20") int limit,
+            @AuthenticationPrincipal OmniUserPrincipal principal
+    ) {
+        access.requireTenant(systemClientId);
+        return ResponseEntity.ok(this.service.getLowStock(systemClientId, offset, limit, principal));
     }
 
     @GetMapping("/sku/{sku}")

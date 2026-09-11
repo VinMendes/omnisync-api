@@ -55,9 +55,12 @@ class DashboardMetricsRepositoryIntegrationTest {
 
         assertThat(metrics.products().totalProducts()).isEqualTo(2);
         assertThat(metrics.products().totalStock()).isEqualTo(20);
+        assertThat(metrics.products().inventoryValue()).isEqualByComparingTo("200.00");
+        assertThat(metrics.products().lowStockCount()).isZero();
         assertThat(metrics.products().activeListings()).isEqualTo(1);
         assertThat(metrics.products().previousProducts()).isEqualTo(1);
         assertThat(metrics.revenue().revenueToday()).isEqualByComparingTo("100.00");
+        assertThat(metrics.revenue().salesTodayCount()).isEqualTo(1);
         assertThat(metrics.revenue().revenueYesterday()).isEqualByComparingTo("50.00");
         assertThat(metrics.revenue().soldQuantityInRange()).isEqualTo(3);
         assertThat(metrics.salesByDay()).hasSize(2);
@@ -65,6 +68,11 @@ class DashboardMetricsRepositoryIntegrationTest {
         assertThat(metrics.salesByDay().get(0).total()).isEqualByComparingTo("50.00");
         assertThat(metrics.salesByDay().get(1).date()).isEqualTo(LocalDate.parse("2026-08-20"));
         assertThat(metrics.salesByDay().get(1).total()).isEqualByComparingTo("100.00");
+        assertThat(metrics.recentEvents()).hasSize(3);
+        assertThat(metrics.recentEvents()).allSatisfy(event -> {
+            assertThat(event.entityType()).isEqualTo("SALE");
+            assertThat(event.id()).startsWith("SALE:");
+        });
     }
 
     @Test
@@ -75,11 +83,15 @@ class DashboardMetricsRepositoryIntegrationTest {
 
         assertThat(metrics.products().totalProducts()).isZero();
         assertThat(metrics.products().totalStock()).isZero();
+        assertThat(metrics.products().inventoryValue()).isEqualByComparingTo("0");
+        assertThat(metrics.products().lowStockCount()).isZero();
         assertThat(metrics.products().activeListings()).isZero();
         assertThat(metrics.revenue().revenueToday()).isEqualByComparingTo("0");
+        assertThat(metrics.revenue().salesTodayCount()).isZero();
         assertThat(metrics.revenue().revenueYesterday()).isEqualByComparingTo("0");
         assertThat(metrics.revenue().soldQuantityInRange()).isZero();
         assertThat(metrics.salesByDay()).isEmpty();
+        assertThat(metrics.recentEvents()).isEmpty();
     }
 
     @Test
@@ -102,6 +114,23 @@ class DashboardMetricsRepositoryIntegrationTest {
         assertThat(measured.queryElapsedMillis()).isLessThan(500);
     }
 
+    @Test
+    void calculatesInventoryValueAndCountsProductsBelowOrExactlyAtMinimumStock() {
+        long tenant = insertTenant("Stock policy tenant", "50000000000500");
+        long anotherTenant = insertTenant("Isolated stock tenant", "60000000000600");
+
+        insertProductWithStockPolicy(tenant, "BELOW", 4, 1, 5, "20.00", true);
+        insertProductWithStockPolicy(tenant, "EQUAL", 7, 2, 5, "10.00", true);
+        insertProductWithStockPolicy(tenant, "ABOVE", 8, 2, 5, "5.00", true);
+        insertProductWithStockPolicy(tenant, "INACTIVE", 1, 0, 5, "1000.00", false);
+        insertProductWithStockPolicy(anotherTenant, "OTHER", 1, 0, 5, "1000.00", true);
+
+        var metrics = load(tenant);
+
+        assertThat(metrics.products().lowStockCount()).isEqualTo(2);
+        assertThat(metrics.products().inventoryValue()).isEqualByComparingTo("190.00");
+    }
+
     private DashboardMetricsRepository.DashboardMetrics load(long tenant) {
         return repository.load(
                 tenant, RANGE_START, PREVIOUS_RANGE_START, RANGE_END, TODAY_START, YESTERDAY_START
@@ -119,10 +148,37 @@ class DashboardMetricsRepositoryIntegrationTest {
         String resource = mlItemId == null ? "{}" : "{\"mercado_livre\":{\"item_id\":\"" + mlItemId + "\"}}";
         return jdbc.queryForObject("""
                         INSERT INTO products(system_client_id, sku, name, description, stock, reserved_stock,
-                                             price, resource, active, created_at)
-                        VALUES (?, ?, ?, 'Test product', ?, 0, 10.00, ?::jsonb, ?, ?) RETURNING id
+                                             minimum_stock, price, resource, active, created_at)
+                        VALUES (?, ?, ?, 'Test product', ?, 0, 0, 10.00, ?::jsonb, ?, ?) RETURNING id
                         """,
                 Long.class, tenant, sku, sku, stock, resource, active, Timestamp.valueOf(createdAt)
+        );
+    }
+
+    private long insertProductWithStockPolicy(
+            long tenant,
+            String sku,
+            int stock,
+            int reservedStock,
+            int minimumStock,
+            String price,
+            boolean active
+    ) {
+        return jdbc.queryForObject("""
+                        INSERT INTO products(system_client_id, sku, name, description, stock, reserved_stock,
+                                             minimum_stock, price, resource, active, created_at)
+                        VALUES (?, ?, ?, 'Test product', ?, ?, ?, ?, '{}'::jsonb, ?, ?) RETURNING id
+                        """,
+                Long.class,
+                tenant,
+                sku,
+                sku,
+                stock,
+                reservedStock,
+                minimumStock,
+                new BigDecimal(price),
+                active,
+                Timestamp.valueOf(LocalDateTime.parse("2026-08-01T10:00:00"))
         );
     }
 

@@ -37,8 +37,9 @@ class DashboardServiceTest {
     @Test
     void fillsEveryDayWithZerosAndAvoidsDivisionByZero() {
         when(repository.load(eq(3L), any(), any(), any(), any(), any())).thenReturn(new DashboardMetrics(
-                new ProductMetrics(0, 0, 0, 0, 0),
-                new RevenueMetrics(BigDecimal.ZERO, BigDecimal.ZERO, 0),
+                new ProductMetrics(0, 0, BigDecimal.ZERO, 0, 0, 0, 0),
+                new RevenueMetrics(BigDecimal.ZERO, 0, BigDecimal.ZERO, 0),
+                List.of(),
                 List.of(),
                 3
         ));
@@ -47,13 +48,17 @@ class DashboardServiceTest {
 
         assertThat(summary.totalProducts()).isZero();
         assertThat(summary.totalStock()).isZero();
+        assertThat(summary.inventoryValue()).isEqualByComparingTo("0.00");
+        assertThat(summary.lowStockCount()).isZero();
         assertThat(summary.activeListings()).isZero();
         assertThat(summary.revenueToday()).isEqualByComparingTo("0.00");
+        assertThat(summary.salesTodayCount()).isZero();
         assertThat(summary.totalProductsChangePct()).isEqualByComparingTo("0.0");
         assertThat(summary.totalStockChangePct()).isEqualByComparingTo("0.0");
         assertThat(summary.activeListingsChangePct()).isEqualByComparingTo("0.0");
         assertThat(summary.revenueTodayChangePct()).isEqualByComparingTo("0.0");
         assertThat(summary.salesByDay()).hasSize(7);
+        assertThat(summary.recentEvents()).isEmpty();
         assertThat(summary.salesByDay()).extracting(DashboardSalesDay::date)
                 .containsExactly(
                         LocalDate.parse("2026-08-14"), LocalDate.parse("2026-08-15"),
@@ -70,9 +75,10 @@ class DashboardServiceTest {
     @Test
     void calculatesChangesAndKeepsDatabaseDailyTotals() {
         when(repository.load(eq(3L), any(), any(), any(), any(), any())).thenReturn(new DashboardMetrics(
-                new ProductMetrics(128, 4521, 83, 125, 79),
-                new RevenueMetrics(new BigDecimal("14290.00"), new BigDecimal("12725.00"), 37),
+                new ProductMetrics(128, 4521, new BigDecimal("48250.90"), 7, 83, 125, 79),
+                new RevenueMetrics(new BigDecimal("14290.00"), 18, new BigDecimal("12725.00"), 37),
                 List.of(new DashboardSalesDay(LocalDate.parse("2026-08-20"), new BigDecimal("4200.00"), 12)),
+                List.of(),
                 4
         ));
 
@@ -82,6 +88,9 @@ class DashboardServiceTest {
         assertThat(summary.totalStockChangePct()).isEqualByComparingTo("-0.8");
         assertThat(summary.activeListingsChangePct()).isEqualByComparingTo("5.1");
         assertThat(summary.revenueTodayChangePct()).isEqualByComparingTo("12.3");
+        assertThat(summary.inventoryValue()).isEqualByComparingTo("48250.90");
+        assertThat(summary.lowStockCount()).isEqualTo(7);
+        assertThat(summary.salesTodayCount()).isEqualTo(18);
         assertThat(summary.salesByDay().get(6).total()).isEqualByComparingTo("4200.00");
         assertThat(summary.salesByDay().get(6).count()).isEqualTo(12);
     }

@@ -33,6 +33,9 @@ public class Product {
     @Column(name="reserved_stock", nullable = false, columnDefinition = "INT")
     private int reservedStock;
 
+    @Column(name="minimum_stock", nullable = false, columnDefinition = "INT")
+    private int minimumStock;
+
     @Column(name="price", nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
 
@@ -102,6 +105,14 @@ public class Product {
 
     public void setReservedStock(int reservedStock) {
         this.reservedStock = reservedStock;
+    }
+
+    public int getMinimumStock() {
+        return minimumStock;
+    }
+
+    public void setMinimumStock(int minimumStock) {
+        this.minimumStock = minimumStock;
     }
 
     public boolean getActive() {

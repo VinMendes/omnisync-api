@@ -2,6 +2,8 @@ package com.puccampinas.omnisync.core.product.service;
 
 import com.puccampinas.omnisync.common.enums.Marketplace;
 import com.puccampinas.omnisync.common.util.OffsetLimitPageable;
+import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
+import com.puccampinas.omnisync.core.product.dto.LowStockProductsResponse;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
@@ -15,6 +17,8 @@ import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRep
 import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -120,6 +124,32 @@ public class ProductService {
                 .map(this::toDto);
     }
 
+    @Transactional(readOnly = true)
+    public LowStockProductsResponse getLowStock(
+            Long systemClientId,
+            long offset,
+            int limit,
+            OmniUserPrincipal principal
+    ) {
+        validateSystemClientId(systemClientId);
+        validatePagination(offset, limit);
+        validateProductReadAccess(systemClientId, principal);
+
+        Page<ProductDto> page = productRepository.findLowStockProducts(
+                        systemClientId,
+                        new OffsetLimitPageable(offset, limit)
+                )
+                .map(this::toDto);
+
+        return new LowStockProductsResponse(
+                page.getContent(),
+                offset,
+                limit,
+                page.getTotalElements(),
+                page.hasNext()
+        );
+    }
+
     public ProductDto getBySku(Long systemClientId, String sku) {
         validateSystemClientId(systemClientId);
         validateSku(sku);
@@ -147,6 +177,7 @@ public class ProductService {
         existing.setDescription(data.getDescription());
         existing.setStock(data.getStock());
         existing.setReservedStock(data.getReservedStock());
+        existing.setMinimumStock(data.getMinimumStock());
         existing.setPrice(data.getPrice());
         existing.setResource(mergeResourceForUpdate(existing.getResource(), data.getResource(), itemId));
 
@@ -254,6 +285,19 @@ public class ProductService {
     private void validateSystemClientId(Long systemClientId) {
         if (systemClientId == null) {
             throw new IllegalArgumentException("System client id is required.");
+        }
+    }
+
+    private void validateProductReadAccess(Long systemClientId, OmniUserPrincipal principal) {
+        if (principal == null || !systemClientId.equals(principal.getSystemClientId())) {
+            throw new EntityNotFoundException("System client not found for the authenticated user.");
+        }
+
+        boolean hasProductRead = principal.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch("PRODUCT_READ"::equals);
+        if (!hasProductRead) {
+            throw new AccessDeniedException("PRODUCT_READ permission is required.");
         }
     }
 
@@ -374,11 +418,7 @@ public class ProductService {
             throw new IllegalArgumentException("Product payload is required.");
         }
 
-        if (data.getSystemClientId() == null) {
-            throw new IllegalArgumentException("System client is required.");
-        }
-
-        if (!data.getSystemClientId().equals(systemClientId)) {
+        if (data.getSystemClientId() != null && !data.getSystemClientId().equals(systemClientId)) {
             throw new IllegalArgumentException("System client id must match the endpoint.");
         }
 
@@ -413,6 +453,10 @@ public class ProductService {
         if (data.getReservedStock() < 0) {
             throw new IllegalArgumentException("Reserved stock has to be above 0.");
         }
+
+        if (data.getMinimumStock() < 0) {
+            throw new IllegalArgumentException("Minimum stock has to be above or equal to 0.");
+        }
     }
 
     private Product toEntity(ProductDto data) {
@@ -423,6 +467,7 @@ public class ProductService {
         product.setDescription(data.getDescription());
         product.setStock(data.getStock());
         product.setReservedStock(data.getReservedStock());
+        product.setMinimumStock(data.getMinimumStock());
         product.setPrice(data.getPrice());
         product.setResource(data.getResource());
         return product;
@@ -437,6 +482,7 @@ public class ProductService {
         copy.setDescription(source.getDescription());
         copy.setStock(source.getStock());
         copy.setReservedStock(source.getReservedStock());
+        copy.setMinimumStock(source.getMinimumStock());
         copy.setPrice(source.getPrice());
         copy.setResource(source.getResource());
         copy.setActive(source.getActive());
@@ -689,6 +735,7 @@ public class ProductService {
                 || !Objects.equals(previousState.getDescription(), currentState.getDescription())
                 || previousState.getStock() != currentState.getStock()
                 || previousState.getReservedStock() != currentState.getReservedStock()
+                || previousState.getMinimumStock() != currentState.getMinimumStock()
                 || !Objects.equals(previousState.getPrice(), currentState.getPrice())
                 || previousState.getActive() != currentState.getActive()
                 || !Objects.equals(previousState.getResource(), currentState.getResource());
@@ -715,6 +762,10 @@ public class ProductService {
         dto.setDescription(product.getDescription());
         dto.setStock(product.getStock());
         dto.setReservedStock(product.getReservedStock());
+        dto.setMinimumStock(product.getMinimumStock());
+        int availableStock = product.getStock() - product.getReservedStock();
+        dto.setAvailableStock(availableStock);
+        dto.setLowStock(availableStock <= product.getMinimumStock());
         dto.setPrice(product.getPrice());
         dto.setResource(product.getResource());
         dto.setActive(product.getActive());

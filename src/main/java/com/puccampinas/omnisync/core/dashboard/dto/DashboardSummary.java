@@ -8,10 +8,14 @@ public record DashboardSummary(
         BigDecimal totalProductsChangePct,
         long totalStock,
         BigDecimal totalStockChangePct,
+        BigDecimal inventoryValue,
         long activeListings,
         BigDecimal activeListingsChangePct,
         BigDecimal revenueToday,
         BigDecimal revenueTodayChangePct,
-        List<DashboardSalesDay> salesByDay
+        long salesTodayCount,
+        long lowStockCount,
+        List<DashboardSalesDay> salesByDay,
+        List<DashboardRecentEvent> recentEvents
 ) {
 }

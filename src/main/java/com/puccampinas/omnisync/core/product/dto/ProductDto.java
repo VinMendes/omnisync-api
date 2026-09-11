@@ -15,6 +15,12 @@ public class ProductDto {
     private int stock;
     @JsonProperty("reserved_stock")
     private int reservedStock;
+    @JsonProperty("minimum_stock")
+    private int minimumStock;
+    @JsonProperty(value = "available_stock", access = JsonProperty.Access.READ_ONLY)
+    private int availableStock;
+    @JsonProperty(value = "low_stock", access = JsonProperty.Access.READ_ONLY)
+    private boolean lowStock;
     private BigDecimal price;
     private Map<String, Object> resource;
     @JsonProperty("system_client_id")
@@ -84,6 +90,30 @@ public class ProductDto {
 
     public void setReservedStock(int reservedStock) {
         this.reservedStock = reservedStock;
+    }
+
+    public int getMinimumStock() {
+        return minimumStock;
+    }
+
+    public void setMinimumStock(int minimumStock) {
+        this.minimumStock = minimumStock;
+    }
+
+    public int getAvailableStock() {
+        return availableStock;
+    }
+
+    public void setAvailableStock(int availableStock) {
+        this.availableStock = availableStock;
+    }
+
+    public boolean isLowStock() {
+        return lowStock;
+    }
+
+    public void setLowStock(boolean lowStock) {
+        this.lowStock = lowStock;
     }
 
     public Map<String, Object> getResource() {

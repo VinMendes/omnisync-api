@@ -1,5 +1,7 @@
 package com.puccampinas.omnisync.core.product.service;
 
+import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
+import com.puccampinas.omnisync.core.product.dto.LowStockProductsResponse;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
@@ -17,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -121,6 +125,50 @@ class ProductServiceTest {
     }
 
     @Test
+    void getLowStockShouldReturnCalculatedFieldsAndPagination() {
+        Product product = buildProduct(10L, 1L);
+        product.setStock(4);
+        product.setReservedStock(1);
+        product.setMinimumStock(5);
+        when(productRepository.findLowStockProducts(eq(1L), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(product)));
+
+        LowStockProductsResponse result = productService.getLowStock(
+                1L, OFFSET, LIMIT, principal(1L, "PRODUCT_READ")
+        );
+
+        assertEquals(1, result.totalElements());
+        assertFalse(result.hasNext());
+        assertEquals(3, result.content().getFirst().getAvailableStock());
+        assertEquals(5, result.content().getFirst().getMinimumStock());
+        assertTrue(result.content().getFirst().isLowStock());
+        verify(productRepository).findLowStockProducts(
+                eq(1L),
+                argThat(pageable -> pageable.getOffset() == OFFSET && pageable.getPageSize() == LIMIT)
+        );
+    }
+
+    @Test
+    void getLowStockShouldRejectAnotherTenant() {
+        assertThrows(
+                EntityNotFoundException.class,
+                () -> productService.getLowStock(1L, OFFSET, LIMIT, principal(2L, "PRODUCT_READ"))
+        );
+
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void getLowStockShouldRequireProductReadPermission() {
+        assertThrows(
+                AccessDeniedException.class,
+                () -> productService.getLowStock(1L, OFFSET, LIMIT, principal(1L, "SALE_READ"))
+        );
+
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
     void getBySkuShouldThrowWhenSkuIsNotFound() {
         when(productRepository.findBySkuAndSystemClientIdAndActiveTrue("SKU-404", 1L))
                 .thenReturn(Optional.empty());
@@ -218,17 +266,19 @@ class ProductServiceTest {
     }
 
     @Test
-    void createShouldThrowWhenPayloadSystemClientIdIsNull() {
+    void createShouldAcceptPayloadSystemClientIdAsOptional() {
         ProductDto dto = validDto();
         dto.setSystemClientId(null);
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product product = invocation.getArgument(0);
+            product.setId(10L);
+            return product;
+        });
 
-        IllegalArgumentException error = assertThrows(
-                IllegalArgumentException.class,
-                () -> productService.create(1L, dto)
-        );
+        ProductDto result = productService.create(1L, dto);
 
-        assertEquals("System client is required.", error.getMessage());
-        verifyNoInteractions(productRepository);
+        assertEquals(1L, result.getSystemClientId());
+        verify(productRepository).save(argThat(product -> product.getSystemClientId().equals(1L)));
     }
 
     @Test
@@ -275,6 +325,11 @@ class ProductServiceTest {
     }
 
     @Test
+    void createShouldThrowWhenMinimumStockIsNegative() {
+        assertCreateValidationError(dto -> dto.setMinimumStock(-1), "Minimum stock has to be above or equal to 0.");
+    }
+
+    @Test
     void createShouldReturnDtoWhenPayloadIsValid() {
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
             Product product = invocation.getArgument(0);
@@ -287,6 +342,9 @@ class ProductServiceTest {
         assertEquals(10L, result.getId());
         assertEquals(1L, result.getSystemClientId());
         assertTrue(result.isActive());
+        assertEquals(5, result.getMinimumStock());
+        assertEquals(8, result.getAvailableStock());
+        assertFalse(result.isLowStock());
         assertNotNull(result.getCreatedAt());
         verify(productRepository).save(any(Product.class));
         verifyNoInteractions(mercadoLivreListingService);
@@ -568,6 +626,7 @@ class ProductServiceTest {
         dto.setDescription("Valid description");
         dto.setStock(10);
         dto.setReservedStock(2);
+        dto.setMinimumStock(5);
         dto.setPrice(new BigDecimal("99.90"));
         dto.setResource(validResource());
         return dto;
@@ -582,6 +641,7 @@ class ProductServiceTest {
         product.setDescription("Valid description");
         product.setStock(10);
         product.setReservedStock(2);
+        product.setMinimumStock(5);
         product.setPrice(new BigDecimal("99.90"));
         product.setResource(validResource());
         product.setActive(true);
@@ -598,6 +658,19 @@ class ProductServiceTest {
                         "pictures", List.of(Map.of("source", "https://example.com/product.jpg")),
                         "attributes", List.of(Map.of("id", "BRAND", "value_name", "Test Brand"))
                 )
+        );
+    }
+
+    private OmniUserPrincipal principal(Long systemClientId, String... authorities) {
+        return new OmniUserPrincipal(
+                1L,
+                systemClientId,
+                "Product user",
+                "product@example.com",
+                null,
+                true,
+                true,
+                java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()
         );
     }
 

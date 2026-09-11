@@ -71,11 +71,15 @@ public class DashboardService {
                 percentageChange(metrics.products().totalProducts(), metrics.products().previousProducts()),
                 metrics.products().totalStock(),
                 percentageChange(metrics.products().totalStock(), previousStock),
+                money(metrics.products().inventoryValue()),
                 metrics.products().activeListings(),
                 percentageChange(metrics.products().activeListings(), metrics.products().previousListings()),
                 money(metrics.revenue().revenueToday()),
                 percentageChange(metrics.revenue().revenueToday(), metrics.revenue().revenueYesterday()),
-                completeSeries
+                metrics.revenue().salesTodayCount(),
+                metrics.products().lowStockCount(),
+                completeSeries,
+                metrics.recentEvents()
         );
     }
 

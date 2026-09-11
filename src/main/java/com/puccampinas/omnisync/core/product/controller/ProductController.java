@@ -1,9 +1,12 @@
 package com.puccampinas.omnisync.core.product.controller;
 
+import com.puccampinas.omnisync.core.auth.security.OmniUserPrincipal;
+import com.puccampinas.omnisync.core.product.dto.LowStockProductsResponse;
 import com.puccampinas.omnisync.core.product.dto.ProductDto;
 import com.puccampinas.omnisync.core.product.service.ProductService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -33,6 +36,16 @@ public class ProductController {
             @RequestParam(defaultValue = "20") int limit
     ) {
         return ResponseEntity.ok(this.service.getAll(systemClientId, offset, limit));
+    }
+
+    @GetMapping("/low-stock")
+    public ResponseEntity<LowStockProductsResponse> getLowStock(
+            @PathVariable Long systemClientId,
+            @RequestParam(defaultValue = "0") long offset,
+            @RequestParam(defaultValue = "20") int limit,
+            @AuthenticationPrincipal OmniUserPrincipal principal
+    ) {
+        return ResponseEntity.ok(this.service.getLowStock(systemClientId, offset, limit, principal));
     }
 
     @GetMapping("/sku/{sku}")

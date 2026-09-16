@@ -20,6 +20,11 @@ public class GlobalExceptionHandler {
 
     private static final Pattern PERMISSION_AUTHORITY = Pattern.compile("\\bPERM_([A-Z][A-Z0-9_]*)\\b");
 
+    @ExceptionHandler(com.puccampinas.omnisync.core.report.ReportGenerationException.class)
+    public ResponseEntity<ErrorResponse> handleReportGeneration(RuntimeException ex) {
+        return ResponseEntity.unprocessableEntity().body(new ErrorResponse(422, ex.getMessage()));
+    }
+
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleEntityNotFound(EntityNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)

@@ -280,6 +280,27 @@ public class MercadoLivreListingService {
         return getListing(systemClientId, itemId);
     }
 
+    /**
+     * Focused command used by the durable stock dispatcher. It deliberately
+     * performs no local product write and sends no full listing snapshot.
+     */
+    public Map<String, Object> updateAvailableQuantity(
+            Long systemClientId,
+            String itemId,
+            int availableQuantity
+    ) {
+        validateSystemClientId(systemClientId);
+        validateItemId(itemId);
+        if (availableQuantity < 0) {
+            throw new IllegalArgumentException("Available quantity cannot be negative.");
+        }
+        return mercadoLivreClient.updateItemAvailableQuantity(
+                getAccessToken(systemClientId),
+                itemId,
+                availableQuantity
+        );
+    }
+
     private String getAccessToken(Long systemClientId) {
         return marketplaceTokenService.getValidAccessToken(systemClientId, Marketplace.MERCADO_LIVRE);
     }

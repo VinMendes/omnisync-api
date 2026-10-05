@@ -187,7 +187,7 @@ public class ProductService {
         validateIdentifiers(systemClientId, id);
         validator(data, systemClientId);
 
-        Product existing = findActiveById(systemClientId, id);
+        Product existing = lockForStockWrite(systemClientId, findActiveById(systemClientId, id));
         Product previousState = copy(existing);
         String itemId = extractMercadoLivreItemIdOrNull(existing.getResource());
         existing.setSystemClientId(systemClientId);
@@ -598,6 +598,10 @@ public class ProductService {
             created = true;
         }
 
+        if (!created) {
+            target = lockForStockWrite(systemClientId, target);
+        }
+
         String sku = resolveLocalSku(systemClientId, target, productBySku, requestedSku, itemId);
         boolean reactivated = !created && !target.getActive();
         Product previousState = created ? null : copy(target);
@@ -671,6 +675,13 @@ public class ProductService {
 
     private int deactivateMissingMercadoLivreProducts(Long systemClientId, Set<String> syncedItemIds, AuditSource source) {
         List<Product> mercadoLivreProducts = productRepository.findAllMercadoLivreProductsBySystemClientId(systemClientId);
+        List<Long> productIds = mercadoLivreProducts.stream().map(Product::getId).distinct().sorted().toList();
+        if (!productIds.isEmpty()) {
+            List<Product> locked = productRepository.findAllBySystemClientIdAndIdInForUpdate(systemClientId, productIds);
+            if (!locked.isEmpty()) {
+                mercadoLivreProducts = locked;
+            }
+        }
         int deactivated = 0;
 
         for (Product product : mercadoLivreProducts) {
@@ -689,6 +700,12 @@ public class ProductService {
         }
 
         return deactivated;
+    }
+
+    private Product lockForStockWrite(Long systemClientId, Product product) {
+        List<Product> locked = productRepository.findAllBySystemClientIdAndIdInForUpdate(
+                systemClientId, List.of(product.getId()));
+        return locked.isEmpty() ? product : locked.getFirst();
     }
 
     private List<Map<String, Object>> extractMercadoLivreItems(Object rawItems) {

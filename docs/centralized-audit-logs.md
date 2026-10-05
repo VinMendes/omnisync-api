@@ -93,8 +93,10 @@ servidor, nunca o corpo da requisição, o state OAuth ou respostas brutas do pr
 
 ## Compatibilidade e uso
 
-O frontend não foi alterado. Todas as sincronizações atuais continuam sendo auditadas
-com source=WEB. Para distinguir o gatilho, o mesmo endpoint de sync aceita o parâmetro
+O frontend agora consome a consulta na aba **Auditoria** da tela de usuários,
+visível para quem possui `AUDIT_READ`, com filtros, paginação e detalhe dos
+snapshots. Todas as sincronizações atuais continuam sendo auditadas com source=WEB.
+Para distinguir o gatilho, o mesmo endpoint de sync aceita o parâmetro
 opcional `source=MANUAL` ou `source=AUTOMATIC`; esse rótulo é informativo, não concede
 permissões. O backend não consegue distinguir um clique de um efeito automático da
 tela quando os dois enviam requisições idênticas. Não foi criado um scheduler novo.

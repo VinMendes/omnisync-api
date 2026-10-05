@@ -18,7 +18,9 @@ import com.puccampinas.omnisync.integration.client.MercadoLivreClient;
 import com.puccampinas.omnisync.integration.dto.MercadoLivreTokenResponse;
 import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
+import com.puccampinas.omnisync.integration.repository.MarketplaceWebhookInboxRepository;
 import com.puccampinas.omnisync.integration.service.MercadoLivreAuthService;
+import com.puccampinas.omnisync.integration.service.MercadoLivreOrderWebhookService;
 import com.puccampinas.omnisync.support.EmbeddedPostgresTestConfig;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.*;
@@ -62,6 +64,8 @@ class AuditIntegrationTest {
     @Autowired MarketplaceIntegrationRepository integrations;
     @Autowired ProductRepository products;
     @Autowired ProductService productService;
+    @Autowired MarketplaceWebhookInboxRepository webhookInbox;
+    @Autowired MercadoLivreOrderWebhookService orderWebhookService;
     @Autowired AuditService audit;
     @Autowired PlatformTransactionManager transactions;
     @Autowired CustomUserDetailsService details;
@@ -187,13 +191,17 @@ class AuditIntegrationTest {
         update.put("name", "Updated product"); update.put("stock", 15); update.put("price", 54.90);
         mvc.perform(put("/api/products/" + tenant + "/" + id).cookie(cookie)
                 .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(update))).andExpect(status().isOk());
-        var sale = Map.of("productId", id, "quantity", 2, "totalValue", 109.80, "resource", Map.of("token", "sale-secret"));
+        var sale = Map.of("productId", id, "quantity", 2, "totalValue", 109.80,
+                "channel", "MANUAL", "externalReferenceId", "AUDIT-SALE-1",
+                "resource", Map.of("token", "sale-secret"));
         mvc.perform(post("/api/sales/" + tenant).cookie(cookie).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(List.of(sale)))).andExpect(status().isOk());
         assertThat(count("SALE")).isEqualTo(1);
         long before = count(null);
         mvc.perform(post("/api/sales/" + tenant).cookie(cookie).contentType(MediaType.APPLICATION_JSON)
-                .content(json.writeValueAsString(List.of(sale, Map.of("productId", 999999999, "quantity", 1)))))
+                .content(json.writeValueAsString(List.of(sale, Map.of(
+                        "productId", 999999999, "quantity", 1, "totalValue", 10,
+                        "channel", "MANUAL", "externalReferenceId", "AUDIT-SALE-MISSING")))))
                 .andExpect(status().isNotFound());
         assertThat(count(null)).isEqualTo(before);
         assertThat(products.findById(id).orElseThrow().getStock()).isEqualTo(13);
@@ -400,12 +408,19 @@ class AuditIntegrationTest {
         product.setResource(Map.of("mercado_livre", Map.of("item_id", "MLB-WEBHOOK")));
         products.saveAndFlush(product);
         when(remote.getOrder(anyString(), eq("123"))).thenReturn(Map.of("id", 123, "status", "paid",
+                "seller", Map.of("id", tenant),
                 "access_token", "order-secret", "order_items", List.of(Map.of(
                         "item", Map.of("id", "MLB-WEBHOOK"), "quantity", 2, "unit_price", 10))));
-        String body = json.writeValueAsString(Map.of("resource", "/orders/123", "user_id", tenant, "topic", "orders_v2"));
-        for (int i = 0; i < 2; i++) {
-            mvc.perform(post("/notifications").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
-        }
+        String body = json.writeValueAsString(Map.of(
+                "_id", "audit-webhook-123", "resource", "/orders/123", "user_id", tenant,
+                "topic", "orders_v2", "application_id", 999,
+                "sent", "2026-09-10T15:20:30Z"));
+        mvc.perform(post("/notifications").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.duplicate").value(false));
+        orderWebhookService.processInbox(webhookInbox.findByEventKey(
+                webhookInbox.findAllBySystemClientIdOrderByIdAsc(tenant).getFirst().getEventKey()).orElseThrow());
+        mvc.perform(post("/notifications").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.duplicate").value(true));
         assertThat(count("SALE")).isEqualTo(1);
         var result = mvc.perform(get(path()).cookie(cookie).param("entityType", "SALE").param("role", "SYSTEM"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.total_elements").value(1))

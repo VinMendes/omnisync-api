@@ -225,7 +225,10 @@ class PermissionAuthorizationIntegrationTest {
         mvc.perform(get("/api/sales/{systemClientId}", systemClientId).cookie(access))
                 .andExpect(status().isOk());
         mvc.perform(post("/api/sales/{systemClientId}", systemClientId).cookie(access)
-                        .contentType(MediaType.APPLICATION_JSON).content("[]"))
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                [{"productId":1,"quantity":1,"totalValue":10.00,
+                                  "channel":"MANUAL","externalReferenceId":"AUTH-ADMIN-SALE"}]
+                                """))
                 .andExpect(status().isOk());
         mvc.perform(put("/api/users/{id}", managedUser.getId()).cookie(access)
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -249,10 +252,10 @@ class PermissionAuthorizationIntegrationTest {
                 .andExpect(status().isBadRequest());
         mvc.perform(post("/api/integrations/mercadolivre/webhooks/orders")
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isBadRequest());
         mvc.perform(post("/notifications")
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isBadRequest());
     }
 
     private User user(String email, Role roleName, Set<Permission> permissions) {

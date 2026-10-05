@@ -1,12 +1,16 @@
 package com.puccampinas.omnisync.core.sale.service;
 
 import com.puccampinas.omnisync.core.sale.dto.SaleDto;
+import com.puccampinas.omnisync.core.sale.dto.SaleCreateRequest;
 import com.puccampinas.omnisync.core.sale.entity.Sale;
 import com.puccampinas.omnisync.core.sale.entity.SaleLog;
+import com.puccampinas.omnisync.core.product.entity.Product;
 import com.puccampinas.omnisync.core.product.repository.ProductRepository;
+import com.puccampinas.omnisync.core.sale.enums.SaleChannel;
 import com.puccampinas.omnisync.core.sale.repository.SaleLogRepository;
 import com.puccampinas.omnisync.core.sale.repository.SaleRepository;
-import com.puccampinas.omnisync.integration.service.MercadoLivreListingService;
+import com.puccampinas.omnisync.core.audit.AuditService;
+import com.puccampinas.omnisync.integration.service.MarketplaceStockSyncOutboxService;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,9 +26,11 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -35,7 +41,7 @@ class SaleServiceTest {
     private SaleLogRepository saleLogRepository;
     private ProductRepository productRepository;
     private SaleLogService saleLogService;
-    private MercadoLivreListingService mercadoLivreListingService;
+    private MarketplaceStockSyncOutboxService outboxService;
     private SaleService saleService;
 
     @BeforeEach
@@ -44,9 +50,24 @@ class SaleServiceTest {
         saleLogRepository = mock(SaleLogRepository.class);
         productRepository = mock(ProductRepository.class);
         saleLogService = mock(SaleLogService.class);
-        mercadoLivreListingService = mock(MercadoLivreListingService.class);
-        saleService = new SaleService(saleRepository, saleLogRepository, productRepository, saleLogService, mercadoLivreListingService,
-                mock(com.puccampinas.omnisync.core.audit.AuditService.class));
+        outboxService = mock(MarketplaceStockSyncOutboxService.class);
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> {
+            Sale sale = invocation.getArgument(0);
+            sale.setId(100L);
+            return sale;
+        });
+        when(outboxService.enqueueIfRequired(any(Sale.class), any(Product.class)))
+                .thenReturn(Optional.empty());
+        SaleRegistrationTransaction registrationTransaction = new SaleRegistrationTransaction(
+                productRepository,
+                saleRepository,
+                saleLogService,
+                mock(AuditService.class),
+                outboxService,
+                new SaleRequestNormalizer()
+        );
+        saleService = new SaleService(saleRepository, saleLogRepository, registrationTransaction);
     }
 
     @Test
@@ -97,6 +118,132 @@ class SaleServiceTest {
         );
 
         assertEquals("Sale not found for id=99 and systemClientId=1", error.getMessage());
+    }
+
+    @Test
+    void createShouldUseStockMinusReservedStock() {
+        Product product = buildProduct(3, 1);
+        when(productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(1L, List.of(20L)))
+                .thenReturn(List.of(product));
+
+        List<SaleDto> result = saleService.create(1L, List.of(buildRequest(2, "59.80", 1L)));
+
+        assertEquals(1, result.size());
+        assertEquals(1, product.getStock());
+        verify(productRepository).saveAll(List.of(product));
+    }
+
+    @Test
+    void createShouldAcceptPositiveQuantity() {
+        Product product = buildProduct(3, 1);
+        when(productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(1L, List.of(20L)))
+                .thenReturn(List.of(product));
+
+        saleService.create(1L, List.of(buildRequest(1, "29.90", 1L)));
+
+        assertEquals(2, product.getStock());
+        verify(saleRepository).save(any(Sale.class));
+    }
+
+    @Test
+    void createShouldRejectZeroQuantityBeforeChangingStock() {
+        Product product = buildProduct(3, 1);
+        when(productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(1L, List.of(20L)))
+                .thenReturn(List.of(product));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> saleService.create(1L, List.of(buildRequest(0, "0.00", 1L)))
+        );
+
+        assertEquals(3, product.getStock());
+        verify(productRepository, never()).saveAll(any());
+        verify(saleRepository, never()).save(any(Sale.class));
+    }
+
+    @Test
+    void createShouldRejectNegativeQuantityBeforeChangingStock() {
+        Product product = buildProduct(3, 1);
+        when(productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(1L, List.of(20L)))
+                .thenReturn(List.of(product));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> saleService.create(1L, List.of(buildRequest(-1, "0.00", 1L)))
+        );
+
+        assertEquals(3, product.getStock());
+        verify(productRepository, never()).saveAll(any());
+        verify(saleRepository, never()).save(any(Sale.class));
+    }
+
+    @Test
+    void createShouldAcceptZeroValuePromotionalSale() {
+        Product product = buildProduct(3, 1);
+        when(productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(1L, List.of(20L)))
+                .thenReturn(List.of(product));
+
+        List<SaleDto> result = saleService.create(1L, List.of(buildRequest(1, "0.00", 1L)));
+
+        assertEquals(0, result.getFirst().getTotalValue().compareTo(BigDecimal.ZERO));
+        assertEquals(2, product.getStock());
+    }
+
+    @Test
+    void createShouldRejectNegativeValueBeforeChangingStock() {
+        Product product = buildProduct(3, 1);
+        when(productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(1L, List.of(20L)))
+                .thenReturn(List.of(product));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> saleService.create(1L, List.of(buildRequest(1, "-0.01", 1L)))
+        );
+
+        assertEquals(3, product.getStock());
+        verify(productRepository, never()).saveAll(any());
+        verify(saleRepository, never()).save(any(Sale.class));
+    }
+
+    @Test
+    void createShouldRejectBodyTenantMismatchBeforeProductLookup() {
+        SaleCreateRequest request = buildRequest(1, "29.90", 2L);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> saleService.create(1L, List.of(request))
+        );
+
+        assertTrue(error.getMessage() != null && !error.getMessage().isBlank());
+        verifyNoInteractions(productRepository);
+        verify(saleRepository, never()).save(any(Sale.class));
+    }
+
+    private SaleCreateRequest buildRequest(int quantity, String totalValue, Long bodyTenantId) {
+        SaleCreateRequest request = new SaleCreateRequest();
+        request.setSystemClientId(bodyTenantId);
+        request.setProductId(20L);
+        request.setQuantity(quantity);
+        request.setTotalValue(new BigDecimal(totalValue));
+        request.setChannel(SaleChannel.MANUAL);
+        request.setExternalReferenceId("PDV-20261004-001");
+        request.setResource(Map.of("origin", "PHYSICAL_STORE"));
+        return request;
+    }
+
+    private Product buildProduct(int stock, int reservedStock) {
+        Product product = new Product();
+        product.setId(20L);
+        product.setSystemClientId(1L);
+        product.setSku("SKU-20");
+        product.setName("Produto");
+        product.setDescription("Produto de teste");
+        product.setStock(stock);
+        product.setReservedStock(reservedStock);
+        product.setPrice(new BigDecimal("29.90"));
+        product.setActive(true);
+        product.setResource(Map.of());
+        return product;
     }
 
     private Sale buildSale() {

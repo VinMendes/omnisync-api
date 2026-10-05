@@ -1,6 +1,8 @@
 package com.puccampinas.omnisync.common.exception;
 
 import jakarta.persistence.EntityNotFoundException;
+import com.puccampinas.omnisync.core.sale.exception.InsufficientStockException;
+import com.puccampinas.omnisync.core.sale.exception.IdempotencyConflictException;
 import com.puccampinas.omnisync.config.security.PermissionDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +21,41 @@ import java.util.regex.Pattern;
 public class GlobalExceptionHandler {
 
     private static final Pattern PERMISSION_AUTHORITY = Pattern.compile("\\bPERM_([A-Z][A-Z0-9_]*)\\b");
+
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<ErrorResponse> handleInsufficientStock(InsufficientStockException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(
+                        HttpStatus.CONFLICT.value(),
+                        ex.getMessage(),
+                        InsufficientStockException.CODE,
+                        null,
+                        null,
+                        ex.details()
+                ));
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ResponseEntity<ErrorResponse> handleIdempotencyConflict(IdempotencyConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(
+                        HttpStatus.CONFLICT.value(),
+                        ex.getMessage(),
+                        IdempotencyConflictException.CODE,
+                        null,
+                        null,
+                        null
+                ));
+    }
+
+    @ExceptionHandler({
+            org.springframework.web.bind.MethodArgumentNotValidException.class,
+            org.springframework.web.method.annotation.HandlerMethodValidationException.class,
+            jakarta.validation.ConstraintViolationException.class
+    })
+    public ResponseEntity<ErrorResponse> handleValidation(Exception ex) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(400, "Dados da venda inválidos."));
+    }
 
     @ExceptionHandler(com.puccampinas.omnisync.core.report.ReportGenerationException.class)
     public ResponseEntity<ErrorResponse> handleReportGeneration(RuntimeException ex) {

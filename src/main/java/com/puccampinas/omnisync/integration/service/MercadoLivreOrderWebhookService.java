@@ -14,7 +14,8 @@ import com.puccampinas.omnisync.integration.entity.MarketplaceIntegration;
 import com.puccampinas.omnisync.integration.repository.MarketplaceIntegrationRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -39,6 +40,31 @@ public class MercadoLivreOrderWebhookService {
     private final SaleRepository saleRepository;
     private final SaleLogService saleLogService;
     private final AuditService audit;
+    private final MercadoLivreOrderTransactionService orderTransactionService;
+
+    @Value("${mercadolivre.client-id:}")
+    private String configuredApplicationId;
+
+    @Autowired
+    public MercadoLivreOrderWebhookService(
+            MarketplaceIntegrationRepository marketplaceIntegrationRepository,
+            MarketplaceTokenService marketplaceTokenService,
+            MercadoLivreClient mercadoLivreClient,
+            ProductRepository productRepository,
+            SaleRepository saleRepository,
+            SaleLogService saleLogService,
+            AuditService audit,
+            MercadoLivreOrderTransactionService orderTransactionService
+    ) {
+        this.marketplaceIntegrationRepository = marketplaceIntegrationRepository;
+        this.marketplaceTokenService = marketplaceTokenService;
+        this.mercadoLivreClient = mercadoLivreClient;
+        this.productRepository = productRepository;
+        this.saleRepository = saleRepository;
+        this.saleLogService = saleLogService;
+        this.audit = audit;
+        this.orderTransactionService = orderTransactionService;
+    }
 
     public MercadoLivreOrderWebhookService(
             MarketplaceIntegrationRepository marketplaceIntegrationRepository,
@@ -49,16 +75,10 @@ public class MercadoLivreOrderWebhookService {
             SaleLogService saleLogService,
             AuditService audit
     ) {
-        this.marketplaceIntegrationRepository = marketplaceIntegrationRepository;
-        this.marketplaceTokenService = marketplaceTokenService;
-        this.mercadoLivreClient = mercadoLivreClient;
-        this.productRepository = productRepository;
-        this.saleRepository = saleRepository;
-        this.saleLogService = saleLogService;
-        this.audit = audit;
+        this(marketplaceIntegrationRepository, marketplaceTokenService, mercadoLivreClient, productRepository,
+                saleRepository, saleLogService, audit, null);
     }
 
-    @Transactional
     public Map<String, Object> handleNotification(MercadoLivreNotificationRequest notification) {
         validateNotification(notification);
 
@@ -75,24 +95,50 @@ public class MercadoLivreOrderWebhookService {
         Long systemClientId = integration.getSystemClientId();
         String accessToken = marketplaceTokenService.getValidAccessToken(systemClientId, Marketplace.MERCADO_LIVRE);
         Map<String, Object> order = mercadoLivreClient.getOrder(accessToken, orderId);
+        validateApplicationOwnership(integration, notification.applicationId());
+        validateSellerOwnership(order, notification.userId());
+        if (orderTransactionService != null) {
+            return orderTransactionService.execute(() -> applyFetchedOrder(
+                    systemClientId, notification, orderId, order, true));
+        }
+        return applyFetchedOrder(systemClientId, notification, orderId, order, false);
+    }
+
+    public Map<String, Object> processInbox(com.puccampinas.omnisync.integration.entity.MarketplaceWebhookInbox inbox) {
+        MercadoLivreNotificationRequest notification = new MercadoLivreNotificationRequest(
+                null,
+                inbox.getResource(),
+                Long.valueOf(inbox.getMarketplaceUserId()),
+                inbox.getTopic(),
+                inbox.getApplicationId(),
+                inbox.getAttemptCount(),
+                inbox.getProviderSentAt() == null ? null : inbox.getProviderSentAt().toString(),
+                null
+        );
+        return handleNotification(notification);
+    }
+
+    private Map<String, Object> applyFetchedOrder(
+            Long systemClientId,
+            MercadoLivreNotificationRequest notification,
+            String orderId,
+            Map<String, Object> order,
+            boolean lockProducts
+    ) {
         String normalizedStatus = normalizeSaleStatus(order);
         List<OrderLineContext> lineContexts = extractOrderContexts(order);
         List<Map<String, Object>> lineResults = new ArrayList<>();
 
+        Map<String, Product> productsByItem = resolveProducts(systemClientId, lineContexts, lockProducts);
+
         for (OrderLineContext context : lineContexts) {
-            Product product = productRepository
-                    .findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(systemClientId, context.itemId())
-                    .orElseThrow(() -> new EntityNotFoundException(
-                            "Active product not found for Mercado Livre item_id=" + context.itemId()
-                                    + " and systemClientId=" + systemClientId
-                    ));
+            Product product = productsByItem.get(context.itemId());
 
             String externalReferenceId = buildExternalReferenceId(orderId, context.itemId());
-            Optional<Sale> existingSale = saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(
-                    systemClientId,
-                    CHANNEL,
-                    externalReferenceId
-            );
+            Optional<Sale> existingSale = lockProducts
+                    ? saleRepository.findByIdempotencyKeyForUpdate(systemClientId, CHANNEL, externalReferenceId)
+                    : saleRepository.findBySystemClientIdAndChannelAndExternalReferenceId(
+                            systemClientId, CHANNEL, externalReferenceId);
 
             if (existingSale.isPresent()) {
                 lineResults.add(updateExistingSale(
@@ -117,13 +163,74 @@ public class MercadoLivreOrderWebhookService {
             ));
         }
 
+        String effectiveStatus = lineResults.size() == 1
+                ? String.valueOf(lineResults.getFirst().get("sale_status"))
+                : normalizedStatus;
         return Map.of(
                 "processed", true,
                 "order_id", orderId,
-                "sale_status", normalizedStatus,
+                "sale_status", effectiveStatus,
                 "items_processed", lineResults.size(),
                 "lines", lineResults
         );
+    }
+
+    private Map<String, Product> resolveProducts(
+            Long systemClientId,
+            List<OrderLineContext> contexts,
+            boolean lockProducts
+    ) {
+        Map<String, Product> initiallyResolved = new LinkedHashMap<>();
+        for (OrderLineContext context : contexts) {
+            Product product = productRepository
+                    .findBySystemClientIdAndMercadoLivreItemIdAndActiveTrue(systemClientId, context.itemId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "Active product not found for Mercado Livre item_id=" + context.itemId()
+                                    + " and systemClientId=" + systemClientId));
+            initiallyResolved.put(context.itemId(), product);
+        }
+        if (!lockProducts) {
+            return initiallyResolved;
+        }
+
+        List<Long> orderedIds = initiallyResolved.values().stream().map(Product::getId).distinct().sorted().toList();
+        List<Product> locked = productRepository.findAllActiveBySystemClientIdAndIdInForUpdate(systemClientId, orderedIds);
+        if (locked.size() != orderedIds.size()) {
+            throw new EntityNotFoundException("One or more Mercado Livre products became unavailable.");
+        }
+        Map<Long, Product> lockedById = new java.util.HashMap<>();
+        locked.forEach(product -> lockedById.put(product.getId(), product));
+        Map<String, Product> result = new LinkedHashMap<>();
+        initiallyResolved.forEach((itemId, product) -> result.put(itemId, lockedById.get(product.getId())));
+        return result;
+    }
+
+    private void validateApplicationOwnership(MarketplaceIntegration integration, Long applicationId) {
+        Object integrationApplication = integration.getResource() == null
+                ? null
+                : integration.getResource().get("application_id");
+        String expected = integrationApplication == null ? numericClientId() : String.valueOf(integrationApplication);
+        if (expected != null && !expected.equals(String.valueOf(applicationId))) {
+            throw new IllegalArgumentException("Mercado Livre notification application_id does not own this integration.");
+        }
+    }
+
+    private String numericClientId() {
+        if (configuredApplicationId == null || configuredApplicationId.isBlank()) {
+            return null;
+        }
+        String value = configuredApplicationId.trim();
+        return value.chars().allMatch(Character::isDigit) ? value : null;
+    }
+
+    private void validateSellerOwnership(Map<String, Object> order, Long expectedSellerId) {
+        Object sellerObject = order.get("seller");
+        if (!(sellerObject instanceof Map<?, ?> seller) || seller.get("id") == null) {
+            throw new IllegalArgumentException("Mercado Livre order seller is required for ownership validation.");
+        }
+        if (!String.valueOf(seller.get("id")).equals(String.valueOf(expectedSellerId))) {
+            throw new IllegalArgumentException("Mercado Livre order seller does not own this integration.");
+        }
     }
 
     private Map<String, Object> createSale(
@@ -137,6 +244,8 @@ public class MercadoLivreOrderWebhookService {
         int previousStock = product.getStock();
         int stockDelta = committedQuantity(normalizedStatus, context.quantity());
         int newStock = previousStock - stockDelta;
+
+        ensureStockRemainsAvailable(product, newStock);
 
         if (stockDelta != 0) {
             product.setStock(newStock);
@@ -171,12 +280,18 @@ public class MercadoLivreOrderWebhookService {
             OrderLineContext context
     ) {
         String previousStatus = sale.getStatus();
+        if (isStaleOrDuplicate(sale, order, normalizedStatus, context)) {
+            return buildResult(sale, product, false, orderId, context.itemId());
+        }
         var before = AuditSnapshots.sale(sale);
         int previousStock = product.getStock();
+        int previousQuantity = sale.getQuantity();
         int previousCommittedQuantity = committedQuantity(previousStatus, sale.getQuantity());
         int currentCommittedQuantity = committedQuantity(normalizedStatus, context.quantity());
         int committedDelta = currentCommittedQuantity - previousCommittedQuantity;
         int newStock = previousStock - committedDelta;
+
+        ensureStockRemainsAvailable(product, newStock);
 
         if (committedDelta != 0) {
             product.setStock(newStock);
@@ -205,7 +320,7 @@ public class MercadoLivreOrderWebhookService {
             } else {
                 saleLogService.logUpdated(savedSale, previousStatus, metadata);
             }
-        } else if (committedDelta != 0 || sale.getQuantity() != context.quantity()) {
+        } else if (committedDelta != 0 || previousQuantity != context.quantity()) {
             saleLogService.logUpdated(savedSale, previousStatus, metadata);
         }
 
@@ -318,7 +433,7 @@ public class MercadoLivreOrderWebhookService {
             throw new IllegalArgumentException("Mercado Livre order does not contain order_items.");
         }
 
-        List<OrderLineContext> contexts = new ArrayList<>();
+        Map<String, OrderLineContext> contexts = new LinkedHashMap<>();
         for (Object orderItemObject : orderItems) {
             if (!(orderItemObject instanceof Map<?, ?> orderItem)) {
                 throw new IllegalArgumentException("Mercado Livre order item payload is invalid.");
@@ -344,14 +459,54 @@ public class MercadoLivreOrderWebhookService {
                 throw new IllegalArgumentException("Mercado Livre order item unit_price is invalid.");
             }
 
-            contexts.add(new OrderLineContext(
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()));
+            contexts.merge(
                     itemId,
-                    quantity,
-                    unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()))
-            ));
+                    new OrderLineContext(itemId, quantity, lineTotal),
+                    (left, right) -> new OrderLineContext(
+                            itemId,
+                            left.quantity() + right.quantity(),
+                            left.totalValue().add(right.totalValue())
+                    )
+            );
         }
 
-        return contexts;
+        return new ArrayList<>(contexts.values());
+    }
+
+    private boolean isStaleOrDuplicate(
+            Sale sale,
+            Map<String, Object> order,
+            String normalizedStatus,
+            OrderLineContext context
+    ) {
+        String incomingUpdatedAt = orderUpdatedAt(order);
+        String persistedUpdatedAt = persistedOrderUpdatedAt(sale);
+        if (incomingUpdatedAt != null && persistedUpdatedAt != null
+                && incomingUpdatedAt.compareTo(persistedUpdatedAt) <= 0) {
+            return true;
+        }
+        return java.util.Objects.equals(sale.getStatus(), normalizedStatus)
+                && java.util.Objects.equals(sale.getQuantity(), context.quantity())
+                && sale.getTotalValue() != null
+                && sale.getTotalValue().compareTo(context.totalValue()) == 0;
+    }
+
+    private String orderUpdatedAt(Map<String, Object> order) {
+        Object value = order.get("date_last_updated");
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String persistedOrderUpdatedAt(Sale sale) {
+        if (sale.getResource() == null) {
+            return null;
+        }
+        Object order = sale.getResource().get("order");
+        if (!(order instanceof Map<?, ?> values)) {
+            return null;
+        }
+        Object value = values.get("date_last_updated");
+        return value == null ? null : String.valueOf(value);
     }
 
     private String normalizeSaleStatus(Map<String, Object> order) {
@@ -388,6 +543,12 @@ public class MercadoLivreOrderWebhookService {
             return 0;
         }
         return safeQuantity(quantity);
+    }
+
+    private void ensureStockRemainsAvailable(Product product, int newStock) {
+        if (newStock < 0 || newStock < product.getReservedStock()) {
+            throw new IllegalStateException("Mercado Livre order exceeds the product's available stock.");
+        }
     }
 
     private boolean isCancelledStatus(String orderStatus) {

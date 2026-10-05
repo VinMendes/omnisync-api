@@ -8,6 +8,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
 
 import java.util.List;
 
@@ -30,9 +32,14 @@ public class SaleController {
     @PreAuthorize(HAS_SALE_WRITE)
     public ResponseEntity<List<SaleDto>> create(
             @PathVariable Long systemClientId,
-            @RequestBody List<SaleCreateRequest> requests
+            @RequestBody @NotEmpty List<@Valid SaleCreateRequest> requests
     ) {
         access.requireTenant(systemClientId);
+        for (SaleCreateRequest request : requests) {
+            if (request.getSystemClientId() != null && !systemClientId.equals(request.getSystemClientId())) {
+                throw new IllegalArgumentException("O cliente do corpo deve coincidir com o cliente da rota.");
+            }
+        }
         return ResponseEntity.ok(this.saleService.create(systemClientId, requests));
     }
 

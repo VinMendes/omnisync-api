@@ -137,7 +137,7 @@ class RelationalPermissionFlowIntegrationTest {
                 .cookie(cookie).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(List.of(Map.of(
                         "productId", product.getId(), "quantity", 2, "totalValue", 20,
-                        "channel", "MANUAL")))));
+                        "channel", "MANUAL", "externalReferenceId", "ROLE-" + role + "-SALE")))));
         if (role == Role.VIEWER) {
             forbidden(sale, "SALE_WRITE");
         } else {
@@ -146,6 +146,29 @@ class RelationalPermissionFlowIntegrationTest {
         flushAndClear();
         assertThat(products.findById(product.getId()).orElseThrow().getStock())
                 .isEqualTo(role == Role.VIEWER ? 10 : 8);
+    }
+
+    @Test
+    void saleWriteRejectsBodyTenantThatDiffersFromAuthorizedPath() throws Exception {
+        SystemClient foreign = company("foreign-sale-body");
+        int stockBefore = products.findById(product.getId()).orElseThrow().getStock();
+
+        mvc.perform(post("/api/sales/{client}", company.getId())
+                        .cookie(login(admin))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(List.of(Map.of(
+                                "systemClientId", foreign.getId(),
+                                "productId", product.getId(),
+                                "quantity", 1,
+                                "totalValue", 10,
+                                "channel", "MANUAL",
+                                "externalReferenceId", "TENANT-MISMATCH"
+                        )))))
+                .andExpect(status().isBadRequest());
+
+        assertThat(products.findById(product.getId()).orElseThrow().getStock()).isEqualTo(stockBefore);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sales WHERE external_reference_id='TENANT-MISMATCH'",
+                Long.class)).isZero();
     }
 
     @ParameterizedTest
@@ -172,7 +195,9 @@ class RelationalPermissionFlowIntegrationTest {
         String endpoint = path.replace("{client}", company.getId().toString())
                 .replace("{product}", product.getId().toString())
                 .replace("{user}", sellerA.getId().toString());
-        String body = path.startsWith("/api/sales/") ? "[]"
+        String body = path.startsWith("/api/sales/") ? json.writeValueAsString(List.of(Map.of(
+                "productId", product.getId(), "quantity", 1, "totalValue", 10,
+                "channel", "MANUAL", "externalReferenceId", "RESTRICTED-SALE")))
                 : path.endsWith("/exchange") ? "{\"code\":\"test\",\"state\":\"test\"}" : "{}";
 
         forbidden(mvc.perform(request(HttpMethod.valueOf(method), endpoint)
@@ -366,9 +391,14 @@ class RelationalPermissionFlowIntegrationTest {
         flushAndClear();
         String endpoint = path.replace("{client}", foreign.getId().toString())
                 .replace("{product}", foreignProduct.getId().toString());
+        String requestBody = path.startsWith("/api/sales/")
+                ? json.writeValueAsString(List.of(Map.of(
+                        "productId", foreignProduct.getId(), "quantity", 1, "totalValue", 10,
+                        "channel", "MANUAL", "externalReferenceId", "FOREIGN-PATH-SALE")))
+                : body;
         mvc.perform(request(HttpMethod.valueOf(method), endpoint).cookie(login(admin))
                         .param("systemClientId", foreign.getId().toString()).param("q", "test")
-                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
                 .andExpect(status().isNotFound());
         assertThat(clients.findById(foreign.getId()).orElseThrow().getActive()).isTrue();
         assertThat(products.findById(foreignProduct.getId()).orElseThrow().getActive()).isTrue();

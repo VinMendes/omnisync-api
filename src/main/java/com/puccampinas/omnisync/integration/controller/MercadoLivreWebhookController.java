@@ -1,7 +1,8 @@
 package com.puccampinas.omnisync.integration.controller;
 
 import com.puccampinas.omnisync.integration.dto.MercadoLivreNotificationRequest;
-import com.puccampinas.omnisync.integration.service.MercadoLivreOrderWebhookService;
+import com.puccampinas.omnisync.integration.service.MarketplaceWebhookInboxService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,21 +14,21 @@ import java.util.Map;
 @RestController
 public class MercadoLivreWebhookController {
 
-    private final MercadoLivreOrderWebhookService mercadoLivreOrderWebhookService;
+    private final MarketplaceWebhookInboxService inboxService;
 
-    public MercadoLivreWebhookController(MercadoLivreOrderWebhookService mercadoLivreOrderWebhookService) {
-        this.mercadoLivreOrderWebhookService = mercadoLivreOrderWebhookService;
+    public MercadoLivreWebhookController(MarketplaceWebhookInboxService inboxService) {
+        this.inboxService = inboxService;
     }
 
     @PostMapping("/api/integrations/mercadolivre/webhooks/orders")
-    public ResponseEntity<Map<String, Object>> orders(@RequestBody MercadoLivreNotificationRequest notification) {
-        return ResponseEntity.ok(mercadoLivreOrderWebhookService.handleNotification(notification));
+    public ResponseEntity<Map<String, Object>> orders(@Valid @RequestBody MercadoLivreNotificationRequest notification) {
+        return ResponseEntity.ok(inboxService.receive(notification));
     }
 
     @PostMapping("/notifications")
     public ResponseEntity<Map<String, Object>> notifications(
-            @RequestBody MercadoLivreNotificationRequest notification
+            @Valid @RequestBody MercadoLivreNotificationRequest notification
     ) {
-        return ResponseEntity.ok(mercadoLivreOrderWebhookService.handleNotification(notification));
+        return ResponseEntity.ok(inboxService.receive(notification));
     }
 }

@@ -473,6 +473,8 @@ class ProductServiceTest {
         verify(productLogService).logCreate(any(Product.class));
         verify(productLogService).logEdit(any(Product.class), any(Product.class));
         verify(productLogService).logDelete(any(Product.class), any(Product.class));
+        verify(productRepository).findAllBySystemClientIdAndIdInForUpdate(1L, List.of(10L));
+        verify(productRepository).findAllBySystemClientIdAndIdInForUpdate(1L, List.of(10L, 20L));
         verify(marketplaceIntegrationRepository).saveAndFlush(integration);
     }
 
@@ -647,6 +649,7 @@ class ProductServiceTest {
         assertEquals(new BigDecimal("159.90"), result.getPrice());
         assertEquals(1L, result.getSystemClientId());
         verify(productRepository).findByIdAndSystemClientIdAndActiveTrue(10L, 1L);
+        verify(productRepository).findAllBySystemClientIdAndIdInForUpdate(1L, List.of(10L));
         verify(productRepository).save(any(Product.class));
         verify(mercadoLivreListingService).updateListing(eq(1L), eq(10L), eq("MLB123456789"), any(Product.class));
         verify(productLogService).logEdit(any(Product.class), any(Product.class));
@@ -672,6 +675,7 @@ class ProductServiceTest {
 
         productService.update(1L, 10L, dto);
 
+        verify(productRepository).findAllBySystemClientIdAndIdInForUpdate(1L, List.of(10L));
         verify(mercadoLivreListingService).updateListing(eq(1L), eq(10L), eq("MLB123456789"), any(Product.class));
     }
 

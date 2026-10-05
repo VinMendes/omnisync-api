@@ -182,6 +182,22 @@ public class MercadoLivreClient {
         );
     }
 
+    /**
+     * Updates only the provider's sellable quantity. Keeping this command
+     * narrow prevents an asynchronous stock retry from overwriting title,
+     * price or other listing fields with a stale local snapshot.
+     */
+    public Map<String, Object> updateItemAvailableQuantity(
+            String accessToken,
+            String itemId,
+            int availableQuantity
+    ) {
+        if (availableQuantity < 0) {
+            throw new IllegalArgumentException("Available quantity cannot be negative.");
+        }
+        return updateItem(accessToken, itemId, Map.of("available_quantity", availableQuantity));
+    }
+
     public Map<String, Object> createItemDescription(String accessToken, String itemId, String plainText) {
         return exchange(
                 HttpMethod.POST,

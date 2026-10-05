@@ -5,11 +5,13 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.List;
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
@@ -43,6 +45,33 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findBySkuAndSystemClientId(String sku, Long systemClientId);
 
     Optional<Product> findByIdAndSystemClientIdAndActiveTrue(Long id, Long systemClientId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT product
+              FROM Product product
+             WHERE product.systemClientId = :systemClientId
+               AND product.active = TRUE
+               AND product.id IN :productIds
+             ORDER BY product.id
+            """)
+    List<Product> findAllActiveBySystemClientIdAndIdInForUpdate(
+            @Param("systemClientId") Long systemClientId,
+            @Param("productIds") List<Long> productIds
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT product
+              FROM Product product
+             WHERE product.systemClientId = :systemClientId
+               AND product.id IN :productIds
+             ORDER BY product.id
+            """)
+    List<Product> findAllBySystemClientIdAndIdInForUpdate(
+            @Param("systemClientId") Long systemClientId,
+            @Param("productIds") List<Long> productIds
+    );
 
     @Query(
             value = """

@@ -51,6 +51,13 @@ class DashboardMetricsRepositoryIntegrationTest {
         insertSale(tenant, product, 8, "800.00", "CANCELLED", LocalDateTime.parse("2026-08-20T11:00:00"));
         insertSale(anotherTenant, otherProduct, 50, "50000.00", "CONFIRMED", LocalDateTime.parse("2026-08-20T12:00:00"));
 
+        insertAudit(tenant, "USER", "11", "UPDATE", LocalDateTime.parse("2026-08-20T13:00:00"));
+        insertAudit(tenant, "PRODUCT", String.valueOf(product), "UPDATE", LocalDateTime.parse("2026-08-20T13:01:00"));
+        insertAudit(tenant, "SALE", String.valueOf(todaySale), "CREATE", LocalDateTime.parse("2026-08-20T13:02:00"));
+        insertAudit(tenant, "LISTING", "MLB-21", "PUBLISH", LocalDateTime.parse("2026-08-20T13:03:00"));
+        insertAudit(tenant, "INTEGRATION", "31", "CONNECT", LocalDateTime.parse("2026-08-20T13:04:00"));
+        insertAudit(anotherTenant, "SALE", "999", "CREATE", LocalDateTime.parse("2026-08-20T14:00:00"));
+
         var metrics = load(tenant);
 
         assertThat(metrics.products().totalProducts()).isEqualTo(2);
@@ -68,11 +75,11 @@ class DashboardMetricsRepositoryIntegrationTest {
         assertThat(metrics.salesByDay().get(0).total()).isEqualByComparingTo("50.00");
         assertThat(metrics.salesByDay().get(1).date()).isEqualTo(LocalDate.parse("2026-08-20"));
         assertThat(metrics.salesByDay().get(1).total()).isEqualByComparingTo("100.00");
-        assertThat(metrics.recentEvents()).hasSize(3);
-        assertThat(metrics.recentEvents()).allSatisfy(event -> {
-            assertThat(event.entityType()).isEqualTo("SALE");
-            assertThat(event.id()).startsWith("SALE:");
-        });
+        assertThat(metrics.recentEvents()).hasSize(5);
+        assertThat(metrics.recentEvents()).extracting(event -> event.entityType())
+                .containsExactly("INTEGRATION", "LISTING", "SALE", "PRODUCT", "USER");
+        assertThat(metrics.recentEvents().getFirst().id()).startsWith("INTEGRATION:");
+        assertThat(metrics.recentEvents().get(1).entityId()).isEqualTo("MLB-21");
     }
 
     @Test
@@ -199,6 +206,16 @@ class DashboardMetricsRepositoryIntegrationTest {
                         VALUES (?, ?, ?, ?, '{}'::jsonb, ?)
                         """,
                 sale, tenant, action, newStatus, Timestamp.valueOf(createdAt)
+        );
+    }
+
+    private void insertAudit(long tenant, String entityType, String entityId, String action, LocalDateTime createdAt) {
+        jdbc.update("""
+                        INSERT INTO audit_logs(system_client_id, user_id, user_name, user_email, user_role,
+                                               action, entity_type, entity_id, description, metadata, created_at)
+                        VALUES (?, 1, 'Test user', 'test@example.com', 'admin', ?, ?, ?, 'Test event', '{}'::jsonb, ?)
+                        """,
+                tenant, action, entityType, entityId, Timestamp.valueOf(createdAt)
         );
     }
 }

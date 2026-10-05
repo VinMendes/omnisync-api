@@ -179,34 +179,22 @@ public class DashboardMetricsRepository {
                 .list();
 
         List<DashboardRecentEvent> recentEvents = jdbcClient.sql("""
-                        SELECT event_id, entity_type, entity_id, action, created_at
-                        FROM (
-                            SELECT CONCAT('PRODUCT:', id) AS event_id,
-                                   'PRODUCT' AS entity_type,
-                                   product_id AS entity_id,
-                                   action,
-                                   created_at
-                            FROM product_logs
-                            WHERE system_client_id = :systemClientId
-
-                            UNION ALL
-
-                            SELECT CONCAT('SALE:', id) AS event_id,
-                                   'SALE' AS entity_type,
-                                   sale_id AS entity_id,
-                                   action,
-                                   created_at
-                            FROM sales_logs
-                            WHERE system_client_id = :systemClientId
-                        ) audit_event
-                        ORDER BY created_at DESC, event_id DESC
+                        SELECT
+                            CONCAT(entity_type, ':', id) AS event_id,
+                            entity_type,
+                            entity_id,
+                            action,
+                            created_at
+                        FROM audit_logs
+                        WHERE system_client_id = :systemClientId
+                        ORDER BY created_at DESC, id DESC
                         LIMIT 10
                         """)
                 .param("systemClientId", systemClientId)
                 .query((rs, rowNum) -> new DashboardRecentEvent(
                         rs.getString("event_id"),
                         rs.getString("entity_type"),
-                        rs.getLong("entity_id"),
+                        rs.getString("entity_id"),
                         rs.getString("action"),
                         rs.getTimestamp("created_at").toLocalDateTime()
                 ))

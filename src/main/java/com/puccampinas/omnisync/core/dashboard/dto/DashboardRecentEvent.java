@@ -5,7 +5,7 @@ import java.time.LocalDateTime;
 public record DashboardRecentEvent(
         String id,
         String entityType,
-        long entityId,
+        String entityId,
         String action,
         LocalDateTime createdAt
 ) {

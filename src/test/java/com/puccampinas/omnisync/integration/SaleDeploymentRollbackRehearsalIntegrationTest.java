@@ -19,7 +19,7 @@ class SaleDeploymentRollbackRehearsalIntegrationTest {
     @Autowired JdbcTemplate jdbc;
 
     @Test
-    void rollbackGuardBlocksOldSaleWritesWhileV15DeliveryDataRemainsAvailable() {
+    void rollbackGuardBlocksOldSaleWritesWhileV16DeliveryDataRemainsAvailable() {
         long tenant = jdbc.queryForObject(
                 "INSERT INTO system_client(name, document) VALUES ('Rollback rehearsal','roll-rehearsal') RETURNING id",
                 Long.class);

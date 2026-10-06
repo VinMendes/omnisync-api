@@ -21,7 +21,7 @@ BEGIN
 
     IF duplicate_keys > 0 OR blank_references > 0 THEN
         RAISE EXCEPTION
-            'V15 aborted: idempotency preflight found % duplicate key group(s) and % blank external reference(s)',
+            'V16 aborted: idempotency preflight found % duplicate key group(s) and % blank external reference(s)',
             duplicate_keys,
             blank_references;
     END IF;
@@ -47,7 +47,7 @@ BEGIN
 
     IF invalid_sales > 0 OR invalid_products > 0 THEN
         RAISE EXCEPTION
-            'V15 aborted: invalid history contains % sale row(s) and % product row(s)',
+            'V16 aborted: invalid history contains % sale row(s) and % product row(s)',
             invalid_sales,
             invalid_products;
     END IF;

@@ -14,7 +14,7 @@ class SaleConsistencyMigrationIntegrationTest {
 
     @Test
     void cleanDisposableDatabasePassesReadOnlyPreflight() throws Exception {
-        try (EmbeddedPostgres postgres = databaseAtV14()) {
+        try (EmbeddedPostgres postgres = databaseAtV15()) {
             JdbcTemplate jdbc = new JdbcTemplate(postgres.getPostgresDatabase());
 
             assertThat(count(jdbc, """
@@ -33,15 +33,15 @@ class SaleConsistencyMigrationIntegrationTest {
     }
 
     @Test
-    void v15NormalizesReferencesAndAddsConstraintsAndDeliveryTables() throws Exception {
-        try (EmbeddedPostgres postgres = databaseAtV14()) {
+    void v16NormalizesReferencesAndAddsConstraintsAndDeliveryTables() throws Exception {
+        try (EmbeddedPostgres postgres = databaseAtV15()) {
             JdbcTemplate jdbc = new JdbcTemplate(postgres.getPostgresDatabase());
             long tenant = tenant(jdbc, "clean");
             long product = product(jdbc, tenant, "SKU-CLEAN", 5, 1);
             sale(jdbc, tenant, product, 1, BigDecimal.TEN, "  EXT-1  ");
             sale(jdbc, tenant, product, 1, BigDecimal.ZERO, null);
 
-            migrateToV15(postgres);
+            migrateToV16(postgres);
 
             assertThat(jdbc.queryForObject(
                     "SELECT external_reference_id FROM sales WHERE external_reference_id IS NOT NULL",
@@ -66,8 +66,8 @@ class SaleConsistencyMigrationIntegrationTest {
     }
 
     @Test
-    void v15AbortsBeforeMutationForDuplicateOrBlankReferences() throws Exception {
-        try (EmbeddedPostgres postgres = databaseAtV14()) {
+    void v16AbortsBeforeMutationForDuplicateOrBlankReferences() throws Exception {
+        try (EmbeddedPostgres postgres = databaseAtV15()) {
             JdbcTemplate jdbc = new JdbcTemplate(postgres.getPostgresDatabase());
             long tenant = tenant(jdbc, "unsafe-ref");
             long product = product(jdbc, tenant, "SKU-REF", 5, 0);
@@ -75,8 +75,8 @@ class SaleConsistencyMigrationIntegrationTest {
             sale(jdbc, tenant, product, 1, BigDecimal.ONE, " DUP ");
             sale(jdbc, tenant, product, 1, BigDecimal.ONE, "   ");
 
-            assertThatThrownBy(() -> migrateToV15(postgres))
-                    .hasStackTraceContaining("V15 aborted")
+            assertThatThrownBy(() -> migrateToV16(postgres))
+                    .hasStackTraceContaining("V16 aborted")
                     .hasStackTraceContaining("idempotency");
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sales WHERE external_reference_id = ' DUP '", Long.class))
                     .isEqualTo(1L);
@@ -84,29 +84,29 @@ class SaleConsistencyMigrationIntegrationTest {
     }
 
     @Test
-    void v15AbortsForInvalidSaleOrProductInvariants() throws Exception {
-        try (EmbeddedPostgres postgres = databaseAtV14()) {
+    void v16AbortsForInvalidSaleOrProductInvariants() throws Exception {
+        try (EmbeddedPostgres postgres = databaseAtV15()) {
             JdbcTemplate jdbc = new JdbcTemplate(postgres.getPostgresDatabase());
             long tenant = tenant(jdbc, "unsafe-values");
             long product = product(jdbc, tenant, "SKU-BAD", 1, 2);
             sale(jdbc, tenant, product, 0, BigDecimal.valueOf(-1), null);
 
-            assertThatThrownBy(() -> migrateToV15(postgres))
-                    .hasStackTraceContaining("V15 aborted")
+            assertThatThrownBy(() -> migrateToV16(postgres))
+                    .hasStackTraceContaining("V16 aborted")
                     .hasStackTraceContaining("invalid");
         }
     }
 
-    private EmbeddedPostgres databaseAtV14() throws Exception {
+    private EmbeddedPostgres databaseAtV15() throws Exception {
         EmbeddedPostgres postgres = EmbeddedPostgres.builder()
                 .setServerConfig("listen_addresses", "127.0.0.1")
                 .start();
-        Flyway.configure().dataSource(postgres.getPostgresDatabase()).target("14").load().migrate();
+        Flyway.configure().dataSource(postgres.getPostgresDatabase()).target("15").load().migrate();
         return postgres;
     }
 
-    private void migrateToV15(EmbeddedPostgres postgres) {
-        Flyway.configure().dataSource(postgres.getPostgresDatabase()).target("15").load().migrate();
+    private void migrateToV16(EmbeddedPostgres postgres) {
+        Flyway.configure().dataSource(postgres.getPostgresDatabase()).target("16").load().migrate();
     }
 
     private long count(JdbcTemplate jdbc, String sql) {

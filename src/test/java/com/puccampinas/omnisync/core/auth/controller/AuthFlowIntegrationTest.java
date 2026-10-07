@@ -80,6 +80,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.cors.allowed-origins=http://localhost:5173"
 })
 class AuthFlowIntegrationTest {
+    @MockitoBean
+    private jakarta.persistence.EntityManager passwordEntityManager;
+
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     private com.puccampinas.omnisync.core.audit.AuditService audit;
 

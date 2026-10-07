@@ -29,6 +29,12 @@ public class AuditService {
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
+    public void credentialChanged(com.puccampinas.omnisync.core.users.entity.User target, AuditSource source) {
+        recordAs(actor(target.getSystemClientId()), AuditAction.UPDATE, AuditEntityType.USER, target.getId(),
+                null, null, source, Map.of("changed_fields", java.util.List.of("credential")));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     public void userCreated(com.puccampinas.omnisync.core.users.entity.User user) {
         AuditActor actor = actor(user.getSystemClientId());
         boolean signup = actor.id() == null;

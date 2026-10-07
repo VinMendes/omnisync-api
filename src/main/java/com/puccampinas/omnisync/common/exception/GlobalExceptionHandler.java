@@ -20,6 +20,20 @@ import java.util.regex.Pattern;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(org.springframework.web.bind.MethodArgumentNotValidException ex) {
+        // Never serialize BindingResult or rejectedValue: either can contain a credential.
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getDefaultMessage()).filter(java.util.Objects::nonNull)
+                .sorted().findFirst().orElse("Dados inválidos.");
+        return ResponseEntity.badRequest().body(new ErrorResponse(400, message));
+    }
+
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableBody() {
+        return ResponseEntity.badRequest().body(new ErrorResponse(400, "Corpo da requisição inválido."));
+    }
+
     private static final Pattern PERMISSION_AUTHORITY = Pattern.compile("\\bPERM_([A-Z][A-Z0-9_]*)\\b");
 
     @ExceptionHandler(InsufficientStockException.class)
@@ -49,12 +63,11 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler({
-            org.springframework.web.bind.MethodArgumentNotValidException.class,
             org.springframework.web.method.annotation.HandlerMethodValidationException.class,
             jakarta.validation.ConstraintViolationException.class
     })
-    public ResponseEntity<ErrorResponse> handleValidation(Exception ex) {
-        return ResponseEntity.badRequest().body(new ErrorResponse(400, "Dados da venda inválidos."));
+    public ResponseEntity<ErrorResponse> handleConstraintValidation(Exception ex) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(400, "Dados inválidos."));
     }
 
     @ExceptionHandler(com.puccampinas.omnisync.core.report.ReportGenerationException.class)

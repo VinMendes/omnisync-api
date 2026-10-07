@@ -199,12 +199,8 @@ public class AuthController {
      */
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
-        try {
-            authService.resetPassword(req);
-            return ResponseEntity.ok("Senha alterada com sucesso");
-        } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        authService.resetPassword(req);
+        return ResponseEntity.ok("Senha alterada com sucesso");
     }
 
     /**

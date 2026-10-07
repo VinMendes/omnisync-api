@@ -13,4 +13,5 @@ public record ResetPasswordRequest(
         String newPassword
 
 ) {
+    @Override public String toString() { return "ResetPasswordRequest[REDACTED]"; }
 }

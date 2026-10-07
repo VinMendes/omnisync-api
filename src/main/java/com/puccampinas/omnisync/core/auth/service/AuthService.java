@@ -52,6 +52,7 @@ import java.util.Locale;
  */
 @Service
 public class AuthService {
+    private final jakarta.persistence.EntityManager passwordEntityManager;
 
     /**
      * Repositório responsável pelo acesso à tabela de usuários.
@@ -107,7 +108,9 @@ public class AuthService {
                        @Value("${app.frontend.reset-password-url}") String resetPasswordUrl,
                        AuthenticationManager authenticationManager,
                        CustomUserDetailsService userDetailsService,
-                       AuditService audit) {
+                       AuditService audit,
+                       jakarta.persistence.EntityManager passwordEntityManager) {
+        this.passwordEntityManager = passwordEntityManager;
         this.userRepository = userRepository;
         this.tenantRoleRepository = tenantRoleRepository;
         this.passwordEncoder = passwordEncoder;
@@ -237,6 +240,10 @@ public class AuthService {
             return;
         }
 
+        user = userRepository.findForPasswordUpdate(user.getId()).orElseThrow();
+        passwordEntityManager.refresh(user);
+        if (!Boolean.TRUE.equals(user.getActive())) return;
+
         /*
          * Remove tokens antigos desse usuário.
          * Assim, apenas o último link gerado fica válido.
@@ -286,22 +293,16 @@ public class AuthService {
      */
     @Transactional
     public void resetPassword(ResetPasswordRequest req) {
-        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(req.token())
-                .orElseThrow(() -> new RuntimeException("Token inválido"));
-
-        if (resetToken.isUsed()) {
-            throw new RuntimeException("Token já utilizado");
-        }
-
-        if (resetToken.getExpiresAt().isBefore(Instant.now())) {
-            throw new RuntimeException("Token expirado");
-        }
-
-        User user = resetToken.getUser();
-
-        if (!Boolean.TRUE.equals(user.getActive())) {
-            throw new RuntimeException("Usuário inativo");
-        }
+        com.puccampinas.omnisync.core.auth.passwordreset.PasswordPolicy.validate(req.newPassword());
+        Long userId = passwordResetTokenRepository.findUserIdByToken(req.token())
+                .orElseThrow(this::invalidRecoveryLink);
+        User user = userRepository.findForPasswordUpdate(userId).orElseThrow(this::invalidRecoveryLink);
+        passwordEntityManager.refresh(user);
+        PasswordResetToken resetToken = passwordResetTokenRepository.findForConsumption(req.token())
+                .orElseThrow(this::invalidRecoveryLink);
+        passwordEntityManager.refresh(resetToken);
+        if (resetToken.isUsed() || !resetToken.getExpiresAt().isAfter(Instant.now())
+                || !Boolean.TRUE.equals(user.getActive())) throw invalidRecoveryLink();
 
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         userRepository.save(user);
@@ -309,7 +310,12 @@ public class AuthService {
         resetToken.setUsed(true);
         resetToken.setUsedAt(Instant.now());
         passwordResetTokenRepository.save(resetToken);
+        passwordResetTokenRepository.invalidateForUser(userId, Instant.now());
         audit.credentialChanged(user);
+    }
+
+    private IllegalArgumentException invalidRecoveryLink() {
+        return new IllegalArgumentException("Link de recuperação inválido ou expirado.");
     }
 
     /**

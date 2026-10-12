@@ -3,8 +3,10 @@
 ## Contrato e regras
 
 - `GET /api/dashboard/{systemClientId}/summary?range=7d|30d` exige JWT.
-- O tenant da URL deve ser o mesmo do principal autenticado e são exigidas as
-  authorities `PRODUCT_READ` e `SALE_READ`.
+- O tenant da URL deve ser o mesmo do principal autenticado. É exigida ao menos
+  uma authority de leitura: `PRODUCT_READ` ou `SALE_READ`. Métricas de produto e
+  eventos `PRODUCT` no audit só são consultados com `PRODUCT_READ`; vendas e
+  série diária só com `SALE_READ`.
 - Apenas vendas cujo estado atual é `CONFIRMED` entram no faturamento. Quando há
   histórico, a primeira transição de `SaleLog` para `CONFIRMED` define o dia da venda.
 - Os ranges incluem hoje: `7d` retorna hoje e os seis dias anteriores; `30d` retorna

@@ -36,7 +36,7 @@ class DashboardServiceTest {
 
     @Test
     void fillsEveryDayWithZerosAndAvoidsDivisionByZero() {
-        when(repository.load(eq(3L), any(), any(), any(), any(), any())).thenReturn(new DashboardMetrics(
+        when(repository.load(eq(3L), any(), any(), any(), any(), any(), eq(true), eq(true))).thenReturn(new DashboardMetrics(
                 new ProductMetrics(0, 0, BigDecimal.ZERO, 0, 0, 0, 0),
                 new RevenueMetrics(BigDecimal.ZERO, 0, BigDecimal.ZERO, 0),
                 List.of(),
@@ -74,7 +74,7 @@ class DashboardServiceTest {
 
     @Test
     void calculatesChangesAndKeepsDatabaseDailyTotals() {
-        when(repository.load(eq(3L), any(), any(), any(), any(), any())).thenReturn(new DashboardMetrics(
+        when(repository.load(eq(3L), any(), any(), any(), any(), any(), eq(true), eq(true))).thenReturn(new DashboardMetrics(
                 new ProductMetrics(128, 4521, new BigDecimal("48250.90"), 7, 83, 125, 79),
                 new RevenueMetrics(new BigDecimal("14290.00"), 18, new BigDecimal("12725.00"), 37),
                 List.of(new DashboardSalesDay(LocalDate.parse("2026-08-20"), new BigDecimal("4200.00"), 12)),
@@ -100,15 +100,51 @@ class DashboardServiceTest {
         assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(4L, "PERM_PRODUCT_READ", "PERM_SALE_READ")))
                 .isInstanceOf(EntityNotFoundException.class);
 
-        verify(repository, never()).load(any(), any(), any(), any(), any(), any());
+        verify(repository, never()).load(any(), any(), any(), any(), any(), any(), any(Boolean.class), any(Boolean.class));
     }
 
     @Test
-    void requiresBothReadPermissions() {
-        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L, "PERM_SALE_READ")))
+    void requiresAtLeastOneReadPermission() {
+        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L)))
                 .isInstanceOf(AccessDeniedException.class);
-        assertThatThrownBy(() -> service.getSummary(3L, "7d", principal(3L, "PERM_PRODUCT_READ")))
-                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void loadsOnlySalesMetricsWhenUserHasSaleReadOnly() {
+        when(repository.load(eq(3L), any(), any(), any(), any(), any(), eq(false), eq(true)))
+                .thenReturn(new DashboardMetrics(
+                        ProductMetrics.empty(),
+                        new RevenueMetrics(new BigDecimal("14290.00"), 18, new BigDecimal("12725.00"), 37),
+                        List.of(new DashboardSalesDay(LocalDate.parse("2026-08-20"), new BigDecimal("4200.00"), 12)),
+                        List.of(),
+                        2
+                ));
+
+        var summary = service.getSummary(3L, "7d", principal(3L, "PERM_SALE_READ"));
+
+        assertThat(summary.revenueToday()).isEqualByComparingTo("14290.00");
+        assertThat(summary.totalStock()).isZero();
+        assertThat(summary.inventoryValue()).isEqualByComparingTo("0.00");
+        verify(repository).load(eq(3L), any(), any(), any(), any(), any(), eq(false), eq(true));
+    }
+
+    @Test
+    void loadsOnlyProductMetricsWhenUserHasProductReadOnly() {
+        when(repository.load(eq(3L), any(), any(), any(), any(), any(), eq(true), eq(false)))
+                .thenReturn(new DashboardMetrics(
+                        new ProductMetrics(128, 4521, new BigDecimal("48250.90"), 7, 83, 125, 79),
+                        RevenueMetrics.empty(),
+                        List.of(),
+                        List.of(),
+                        2
+                ));
+
+        var summary = service.getSummary(3L, "7d", principal(3L, "PERM_PRODUCT_READ"));
+
+        assertThat(summary.totalStock()).isEqualTo(4521);
+        assertThat(summary.revenueToday()).isEqualByComparingTo("0.00");
+        assertThat(summary.salesTodayCount()).isZero();
+        verify(repository).load(eq(3L), any(), any(), any(), any(), any(), eq(true), eq(false));
     }
 
     @Test

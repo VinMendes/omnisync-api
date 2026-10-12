@@ -42,7 +42,7 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public DashboardSummary getSummary(Long systemClientId, String requestedRange, OmniUserPrincipal principal) {
-        validateAccess(systemClientId, principal);
+        AccessScope access = validateAccess(systemClientId, principal);
         int days = parseRange(requestedRange);
 
         LocalDate today = LocalDate.now(clock);
@@ -57,7 +57,9 @@ public class DashboardService {
                 previousRangeStart,
                 rangeEnd,
                 today.atStartOfDay(),
-                today.minusDays(1).atStartOfDay()
+                today.minusDays(1).atStartOfDay(),
+                access.productRead(),
+                access.saleRead()
         );
 
         long previousStock = metrics.products().totalStock() + metrics.revenue().soldQuantityInRange();
@@ -84,7 +86,7 @@ public class DashboardService {
         );
     }
 
-    private void validateAccess(Long systemClientId, OmniUserPrincipal principal) {
+    private AccessScope validateAccess(Long systemClientId, OmniUserPrincipal principal) {
         if (systemClientId == null || systemClientId <= 0) {
             throw new IllegalArgumentException("System client id must be greater than zero.");
         }
@@ -93,10 +95,15 @@ public class DashboardService {
         }
 
         List<String> authorities = principal.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
-        if (!authorities.contains(PermissionAuthority.PRODUCT_READ)
-                || !authorities.contains(PermissionAuthority.SALE_READ)) {
-            throw new AccessDeniedException("PRODUCT_READ and SALE_READ permissions are required.");
+        boolean productRead = authorities.contains(PermissionAuthority.PRODUCT_READ);
+        boolean saleRead = authorities.contains(PermissionAuthority.SALE_READ);
+        if (!productRead && !saleRead) {
+            throw new AccessDeniedException("PRODUCT_READ or SALE_READ permission is required.");
         }
+        return new AccessScope(productRead, saleRead);
+    }
+
+    private record AccessScope(boolean productRead, boolean saleRead) {
     }
 
     private int parseRange(String requestedRange) {

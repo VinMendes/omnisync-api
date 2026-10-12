@@ -31,9 +31,31 @@ public class DashboardMetricsRepository {
             LocalDateTime todayStart,
             LocalDateTime yesterdayStart
     ) {
+        return load(
+                systemClientId,
+                rangeStart,
+                previousRangeStart,
+                rangeEnd,
+                todayStart,
+                yesterdayStart,
+                true,
+                true
+        );
+    }
+
+    public DashboardMetrics load(
+            Long systemClientId,
+            LocalDateTime rangeStart,
+            LocalDateTime previousRangeStart,
+            LocalDateTime rangeEnd,
+            LocalDateTime todayStart,
+            LocalDateTime yesterdayStart,
+            boolean includeProductMetrics,
+            boolean includeSalesMetrics
+    ) {
         long startedAt = System.nanoTime();
 
-        ProductMetrics products = jdbcClient.sql("""
+        ProductMetrics products = includeProductMetrics ? jdbcClient.sql("""
                         SELECT
                             COUNT(*) FILTER (WHERE active) AS total_products,
                             COALESCE(SUM(stock) FILTER (WHERE active), 0) AS total_stock,
@@ -66,9 +88,9 @@ public class DashboardMetricsRepository {
                         rs.getLong("previous_products"),
                         rs.getLong("previous_listings")
                 ))
-                .single();
+                .single() : ProductMetrics.empty();
 
-        RevenueMetrics revenue = jdbcClient.sql("""
+        RevenueMetrics revenue = includeSalesMetrics ? jdbcClient.sql("""
                         WITH confirmed_sales AS (
                             SELECT
                                 s.id,
@@ -139,9 +161,9 @@ public class DashboardMetricsRepository {
                         rs.getBigDecimal("revenue_yesterday"),
                         rs.getLong("sold_quantity_in_range")
                 ))
-                .single();
+                .single() : RevenueMetrics.empty();
 
-        List<DashboardSalesDay> salesByDay = jdbcClient.sql("""
+        List<DashboardSalesDay> salesByDay = includeSalesMetrics ? jdbcClient.sql("""
                         WITH confirmed_sales AS (
                             SELECT
                                 s.id,
@@ -176,8 +198,9 @@ public class DashboardMetricsRepository {
                         rs.getBigDecimal("total"),
                         rs.getLong("sale_count")
                 ))
-                .list();
+                .list() : List.of();
 
+        String auditEntityFilter = includeProductMetrics ? "" : " AND entity_type <> 'PRODUCT' ";
         List<DashboardRecentEvent> recentEvents = jdbcClient.sql("""
                         SELECT
                             CONCAT(entity_type, ':', id) AS event_id,
@@ -187,6 +210,7 @@ public class DashboardMetricsRepository {
                             created_at
                         FROM audit_logs
                         WHERE system_client_id = :systemClientId
+                        """ + auditEntityFilter + """
                         ORDER BY created_at DESC, id DESC
                         LIMIT 10
                         """)
@@ -216,6 +240,9 @@ public class DashboardMetricsRepository {
             long previousProducts,
             long previousListings
     ) {
+        static ProductMetrics empty() {
+            return new ProductMetrics(0, 0, BigDecimal.ZERO, 0, 0, 0, 0);
+        }
     }
 
     public record RevenueMetrics(
@@ -224,6 +251,9 @@ public class DashboardMetricsRepository {
             BigDecimal revenueYesterday,
             long soldQuantityInRange
     ) {
+        static RevenueMetrics empty() {
+            return new RevenueMetrics(BigDecimal.ZERO, 0, BigDecimal.ZERO, 0);
+        }
     }
 
     public record DashboardMetrics(
